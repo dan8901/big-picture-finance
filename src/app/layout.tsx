@@ -15,7 +15,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Big Picture Finance",
+  title: {
+    default: "Big Picture Finance",
+    template: "%s | Big Picture Finance",
+  },
   description: "Annual financial overview for your household",
 };
 
@@ -31,7 +34,7 @@ export default function RootLayout({
       >
         <div className="flex h-screen">
           <Sidebar />
-          <main className="flex-1 overflow-y-auto p-8">{children}</main>
+          <main className="flex-1 overflow-y-auto p-4 pt-18 md:p-8 md:pt-8">{children}</main>
         </div>
         <Toaster />
       </body>

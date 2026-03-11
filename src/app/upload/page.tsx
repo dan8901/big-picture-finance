@@ -320,6 +320,7 @@ export default function UploadPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="max-h-[400px] overflow-auto rounded-md border">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -365,6 +366,7 @@ export default function UploadPage() {
                   })}
                 </TableBody>
               </Table>
+              </div>
             </div>
             <div className="flex gap-2">
               <Button onClick={handleImport} disabled={importing}>

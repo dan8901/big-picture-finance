@@ -437,14 +437,14 @@ export default function TransactionsPage() {
                 placeholder="Search description or category..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-[250px]"
+                className="w-full sm:w-[250px]"
               />
             </div>
             <div className="space-y-1">
               <Label>Account</Label>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="w-[200px] justify-start font-normal">
+                  <Button variant="outline" className="w-full sm:w-[200px] justify-start font-normal">
                     {accountFilter.size === 0
                       ? "All Accounts"
                       : accountFilter.size === 1
@@ -474,7 +474,7 @@ export default function TransactionsPage() {
             <div className="space-y-1">
               <Label>Owner</Label>
               <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger className="w-full sm:w-[150px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -491,7 +491,7 @@ export default function TransactionsPage() {
               <Label>Category</Label>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="w-[200px] justify-start font-normal">
+                  <Button variant="outline" className="w-full sm:w-[200px] justify-start font-normal">
                     {categoryFilter.size === 0
                       ? "All Categories"
                       : categoryFilter.size === 1
@@ -536,7 +536,7 @@ export default function TransactionsPage() {
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-[160px]"
+                className="w-[calc(50%-0.5rem)] sm:w-[160px]"
               />
             </div>
             <div className="space-y-1">
@@ -545,7 +545,7 @@ export default function TransactionsPage() {
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-[160px]"
+                className="w-[calc(50%-0.5rem)] sm:w-[160px]"
               />
             </div>
             <div className="space-y-1">
@@ -605,7 +605,7 @@ export default function TransactionsPage() {
                 {selected.size} selected
               </span>
               <Select onValueChange={(v) => assignEvent(parseInt(v))}>
-                <SelectTrigger className="w-[200px]">
+                <SelectTrigger className="w-full sm:w-[200px]">
                   <SelectValue placeholder="Assign to event..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -719,7 +719,7 @@ export default function TransactionsPage() {
                   });
                 }}
               >
-                <SelectTrigger className="w-[180px] h-8 text-xs">
+                <SelectTrigger className="w-full sm:w-[180px] h-8 text-xs">
                   <SelectValue placeholder="Set category..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -777,6 +777,7 @@ export default function TransactionsPage() {
             </div>
           ) : (
             <div className="max-h-[600px] overflow-auto">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -914,6 +915,7 @@ export default function TransactionsPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </div>
           )}
         </CardContent>

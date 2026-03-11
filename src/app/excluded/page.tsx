@@ -143,6 +143,7 @@ export default function ExcludedPage() {
             <CardTitle>Excluded by Description</CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -185,6 +186,7 @@ export default function ExcludedPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -224,6 +226,7 @@ export default function ExcludedPage() {
             </div>
           ) : (
             <div className="max-h-[600px] overflow-auto">
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -291,6 +294,7 @@ export default function ExcludedPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </div>
           )}
         </CardContent>

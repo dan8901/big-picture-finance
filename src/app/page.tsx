@@ -163,14 +163,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
           <p className="text-muted-foreground">
             Your financial overview ({monthCount.toFixed(1)} months)
           </p>
         </div>
-        <div className="flex gap-3 items-end">
+        <div className="flex flex-wrap gap-3 items-end">
           <div className="flex gap-1 items-end">
             <Button
               variant={startDate === "2024-10-01" && endDate === lastDayPrevMonth ? "default" : "outline"}
@@ -214,7 +214,7 @@ export default function DashboardPage() {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-[160px]"
+              className="w-full sm:w-[160px]"
             />
           </div>
           <div className="space-y-1">
@@ -223,7 +223,7 @@ export default function DashboardPage() {
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-[160px]"
+              className="w-full sm:w-[160px]"
             />
           </div>
         </div>
@@ -236,7 +236,7 @@ export default function DashboardPage() {
             <CardTitle className="text-sm font-medium">Total Income</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
+            <div className="text-xl sm:text-2xl font-bold text-green-600">
               {data ? formatAmount(data.totalIncome) : "--"}
               {data && data.weightedExchangeRate > 0 && (
                 <span className="text-lg"> / {formatILS(data.totalIncome / data.weightedExchangeRate)}</span>
@@ -256,7 +256,7 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">
+            <div className="text-xl sm:text-2xl font-bold text-red-600">
               {data ? formatAmount(data.totalExpenses) : "--"}
               {data && data.weightedExchangeRate > 0 && (
                 <span className="text-lg"> / {formatILS(data.totalExpenses / data.weightedExchangeRate)}</span>
@@ -322,6 +322,7 @@ export default function DashboardPage() {
                 <CardTitle>Income Breakdown</CardTitle>
               </CardHeader>
               <CardContent>
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -388,6 +389,7 @@ export default function DashboardPage() {
                     </TableRow>
                   </TableBody>
                 </Table>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -397,7 +399,7 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle>Expense Breakdown</CardTitle>
             </CardHeader>
-            <CardContent className="h-[500px]">
+            <CardContent className="h-[300px] md:h-[500px]">
               {categoryData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -405,8 +407,8 @@ export default function DashboardPage() {
                       data={categoryData}
                       cx="50%"
                       cy="50%"
-                      innerRadius={80}
-                      outerRadius={180}
+                      innerRadius={60}
+                      outerRadius={120}
                       dataKey="value"
                       paddingAngle={2}
                       label={({ name, percent }) =>
@@ -444,6 +446,7 @@ export default function DashboardPage() {
                 <CardTitle>Top Merchants by Category</CardTitle>
               </CardHeader>
               <CardContent>
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -534,6 +537,7 @@ export default function DashboardPage() {
                     })}
                   </TableBody>
                 </Table>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -544,7 +548,7 @@ export default function DashboardPage() {
               <CardHeader>
                 <CardTitle>Recurring vs Non-Recurring by Category</CardTitle>
               </CardHeader>
-              <CardContent className="h-[400px]">
+              <CardContent className="h-[300px] md:h-[400px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={[
@@ -589,6 +593,7 @@ export default function DashboardPage() {
                 <CardTitle>Recurring Expenses</CardTitle>
               </CardHeader>
               <CardContent className="max-h-[500px] overflow-y-auto">
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -631,6 +636,7 @@ export default function DashboardPage() {
                     </TableRow>
                   </TableBody>
                 </Table>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -642,6 +648,7 @@ export default function DashboardPage() {
                 <CardTitle>Top Non-Recurring Expenses</CardTitle>
               </CardHeader>
               <CardContent className="max-h-[500px] overflow-y-auto">
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -684,6 +691,7 @@ export default function DashboardPage() {
                     </TableRow>
                   </TableBody>
                 </Table>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -693,7 +701,7 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle>Monthly Trends</CardTitle>
             </CardHeader>
-            <CardContent className="h-[350px]">
+            <CardContent className="h-[280px] md:h-[350px]">
               {data && data.monthlyTrend.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={data.monthlyTrend}>
@@ -792,7 +800,7 @@ export default function DashboardPage() {
               <CardHeader>
                 <CardTitle>Expenses by Person</CardTitle>
               </CardHeader>
-              <CardContent className="h-[300px]">
+              <CardContent className="h-[250px] md:h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={ownerData}>
                     <CartesianGrid strokeDasharray="3 3" />

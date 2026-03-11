@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -49,14 +49,57 @@ const icons: Record<string, React.ReactNode> = {
   LogOut: (
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
   ),
+  Menu: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+  ),
+  X: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+  ),
 };
+
+function NavLink({ item, collapsed, pathname, onClick }: { item: typeof navItems[0]; collapsed: boolean; pathname: string; onClick?: () => void }) {
+  return (
+    <Link
+      key={item.href}
+      href={item.href}
+      onClick={onClick}
+      title={collapsed ? item.label : undefined}
+      className={cn(
+        "flex items-center rounded-md py-2 text-sm font-medium transition-colors",
+        collapsed ? "justify-center px-2" : "gap-3 px-3",
+        pathname === item.href
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      )}
+    >
+      {icons[item.icon]}
+      {!collapsed && item.label}
+    </Link>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState({ done: 0, total: 0 });
+
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  // Prevent body scroll when mobile drawer is open
+  useEffect(() => {
+    if (mobileOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [mobileOpen]);
 
   async function syncRates() {
     setSyncing(true);
@@ -89,7 +132,6 @@ export function Sidebar() {
       }
 
       toast.success(`Fetched ${needed.length} exchange rates`);
-      // Reload page to refresh dashboard data with new rates
       window.location.reload();
     } catch {
       toast.error("Failed to sync exchange rates");
@@ -98,97 +140,175 @@ export function Sidebar() {
     }
   }
 
-  return (
-    <aside
-      className={cn(
-        "flex h-screen flex-col border-r bg-background transition-all duration-200",
-        collapsed ? "w-16" : "w-64"
-      )}
-    >
-      <div className="flex h-14 items-center border-b px-3 justify-between">
-        {!collapsed && (
-          <h1 className="text-lg font-semibold truncate px-2">Big Picture Finance</h1>
+  const bottomItems = (closeMobile?: () => void) => (
+    <div className="border-t p-2 space-y-1">
+      <Link
+        href="/excluded"
+        onClick={closeMobile}
+        className={cn(
+          "flex items-center rounded-md py-2 text-sm font-medium transition-colors gap-3 px-3",
+          pathname === "/excluded"
+            ? "bg-accent text-accent-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
         )}
+      >
+        {icons.EyeOff}
+        Excluded
+      </Link>
+      <button
+        onClick={() => { syncRates(); closeMobile?.(); }}
+        disabled={syncing}
+        className={cn(
+          "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full gap-3 px-3",
+          "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          syncing && "animate-pulse"
+        )}
+      >
+        <span className={syncing ? "animate-spin" : ""}>{icons.RefreshCw}</span>
+        <span className="truncate">
+          {syncing
+            ? syncProgress.total > 0
+              ? `${syncProgress.done}/${syncProgress.total}`
+              : "Checking..."
+            : "Sync Rates"}
+        </span>
+      </button>
+      <button
+        onClick={async () => {
+          await fetch("/api/auth", { method: "DELETE" });
+          router.push("/login");
+        }}
+        className={cn(
+          "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full gap-3 px-3",
+          "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+        )}
+      >
+        {icons.LogOut}
+        Logout
+      </button>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Mobile header bar */}
+      <div className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center border-b bg-background px-4 md:hidden">
         <button
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => setMobileOpen(true)}
           className="flex items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? icons.ChevronRight : icons.ChevronLeft}
+          {icons.Menu}
         </button>
+        <h1 className="ml-3 text-lg font-semibold truncate">Big Picture Finance</h1>
       </div>
-      <nav className="flex-1 space-y-1 p-2">
-        {navItems.map((item) => (
+
+      {/* Mobile drawer overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 md:hidden"
+          onClick={() => setMobileOpen(false)}
+        >
+          <aside
+            className="h-full w-64 bg-background border-r flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex h-14 items-center border-b px-3 justify-between">
+              <h1 className="text-lg font-semibold truncate px-2">Big Picture Finance</h1>
+              <button
+                onClick={() => setMobileOpen(false)}
+                className="flex items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                {icons.X}
+              </button>
+            </div>
+            <nav className="flex-1 space-y-1 p-2">
+              {navItems.map((item) => (
+                <NavLink key={item.href} item={item} collapsed={false} pathname={pathname} onClick={() => setMobileOpen(false)} />
+              ))}
+            </nav>
+            {bottomItems(() => setMobileOpen(false))}
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop sidebar */}
+      <aside
+        className={cn(
+          "hidden md:flex h-screen flex-col border-r bg-background transition-all duration-200",
+          collapsed ? "w-16" : "w-64"
+        )}
+      >
+        <div className="flex h-14 items-center border-b px-3 justify-between">
+          {!collapsed && (
+            <h1 className="text-lg font-semibold truncate px-2">Big Picture Finance</h1>
+          )}
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="flex items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? icons.ChevronRight : icons.ChevronLeft}
+          </button>
+        </div>
+        <nav className="flex-1 space-y-1 p-2">
+          {navItems.map((item) => (
+            <NavLink key={item.href} item={item} collapsed={collapsed} pathname={pathname} />
+          ))}
+        </nav>
+        <div className="border-t p-2 space-y-1">
           <Link
-            key={item.href}
-            href={item.href}
-            title={collapsed ? item.label : undefined}
+            href="/excluded"
+            title={collapsed ? "Excluded" : undefined}
             className={cn(
               "flex items-center rounded-md py-2 text-sm font-medium transition-colors",
               collapsed ? "justify-center px-2" : "gap-3 px-3",
-              pathname === item.href
+              pathname === "/excluded"
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
           >
-            {icons[item.icon]}
-            {!collapsed && item.label}
+            {icons.EyeOff}
+            {!collapsed && "Excluded"}
           </Link>
-        ))}
-      </nav>
-      <div className="border-t p-2 space-y-1">
-        <Link
-          href="/excluded"
-          title={collapsed ? "Excluded" : undefined}
-          className={cn(
-            "flex items-center rounded-md py-2 text-sm font-medium transition-colors",
-            collapsed ? "justify-center px-2" : "gap-3 px-3",
-            pathname === "/excluded"
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          )}
-        >
-          {icons.EyeOff}
-          {!collapsed && "Excluded"}
-        </Link>
-        <button
-          onClick={syncRates}
-          disabled={syncing}
-          title={collapsed ? (syncing ? `Syncing ${syncProgress.done}/${syncProgress.total}` : "Sync Exchange Rates") : undefined}
-          className={cn(
-            "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full",
-            collapsed ? "justify-center px-2" : "gap-3 px-3",
-            "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-            syncing && "animate-pulse"
-          )}
-        >
-          <span className={syncing ? "animate-spin" : ""}>{icons.RefreshCw}</span>
-          {!collapsed && (
-            <span className="truncate">
-              {syncing
-                ? syncProgress.total > 0
-                  ? `${syncProgress.done}/${syncProgress.total}`
-                  : "Checking..."
-                : "Sync Rates"}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={async () => {
-            await fetch("/api/auth", { method: "DELETE" });
-            router.push("/login");
-          }}
-          title={collapsed ? "Logout" : undefined}
-          className={cn(
-            "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full",
-            collapsed ? "justify-center px-2" : "gap-3 px-3",
-            "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          )}
-        >
-          {icons.LogOut}
-          {!collapsed && "Logout"}
-        </button>
-      </div>
-    </aside>
+          <button
+            onClick={syncRates}
+            disabled={syncing}
+            title={collapsed ? (syncing ? `Syncing ${syncProgress.done}/${syncProgress.total}` : "Sync Exchange Rates") : undefined}
+            className={cn(
+              "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full",
+              collapsed ? "justify-center px-2" : "gap-3 px-3",
+              "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+              syncing && "animate-pulse"
+            )}
+          >
+            <span className={syncing ? "animate-spin" : ""}>{icons.RefreshCw}</span>
+            {!collapsed && (
+              <span className="truncate">
+                {syncing
+                  ? syncProgress.total > 0
+                    ? `${syncProgress.done}/${syncProgress.total}`
+                    : "Checking..."
+                  : "Sync Rates"}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={async () => {
+              await fetch("/api/auth", { method: "DELETE" });
+              router.push("/login");
+            }}
+            title={collapsed ? "Logout" : undefined}
+            className={cn(
+              "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full",
+              collapsed ? "justify-center px-2" : "gap-3 px-3",
+              "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            )}
+          >
+            {icons.LogOut}
+            {!collapsed && "Logout"}
+          </button>
+        </div>
+      </aside>
+    </>
   );
 }

@@ -128,7 +128,7 @@ export default function AccountsPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Accounts</h2>
           <p className="text-muted-foreground">
@@ -243,6 +243,7 @@ export default function AccountsPage() {
               No accounts yet. Add your first account to get started.
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -281,6 +282,7 @@ export default function AccountsPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

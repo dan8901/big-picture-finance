@@ -214,7 +214,7 @@ export default function NetWorthPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Net Worth</h2>
           <p className="text-muted-foreground">
@@ -245,7 +245,7 @@ export default function NetWorthPage() {
                 type="date"
                 value={snapshotDate}
                 onChange={(e) => setSnapshotDate(e.target.value)}
-                className="w-[200px]"
+                className="w-full sm:w-[200px]"
               />
             </div>
 
@@ -281,7 +281,7 @@ export default function NetWorthPage() {
                         }
                       }
                     }}
-                    className="w-[200px]"
+                    className="w-full sm:w-[200px]"
                     autoFocus
                   />
                 </div>
@@ -414,6 +414,7 @@ export default function NetWorthPage() {
               <CardTitle>By Account Type</CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -458,6 +459,7 @@ export default function NetWorthPage() {
                     })}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
 
@@ -496,6 +498,7 @@ export default function NetWorthPage() {
               <CardTitle>Latest Balances</CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -531,6 +534,7 @@ export default function NetWorthPage() {
                     ))}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </>
