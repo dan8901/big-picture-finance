@@ -1,0 +1,194 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+
+const navItems = [
+  { href: "/", label: "Dashboard", icon: "LayoutDashboard" },
+  { href: "/upload", label: "Upload", icon: "Upload" },
+  { href: "/transactions", label: "Transactions", icon: "List" },
+  { href: "/income", label: "Income", icon: "TrendingUp" },
+  { href: "/net-worth", label: "Net Worth", icon: "Wallet" },
+  { href: "/accounts", label: "Accounts", icon: "Building" },
+];
+
+const icons: Record<string, React.ReactNode> = {
+  LayoutDashboard: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+  ),
+  Upload: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+  ),
+  List: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>
+  ),
+  TrendingUp: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+  ),
+  Wallet: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>
+  ),
+  Building: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></svg>
+  ),
+  EyeOff: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+  ),
+  ChevronLeft: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+  ),
+  ChevronRight: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+  ),
+  RefreshCw: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+  ),
+  LogOut: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+  ),
+};
+
+export function Sidebar() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [collapsed, setCollapsed] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState({ done: 0, total: 0 });
+
+  async function syncRates() {
+    setSyncing(true);
+    setSyncProgress({ done: 0, total: 0 });
+
+    try {
+      const checkRes = await fetch("/api/exchange-rates");
+      const { needed } = (await checkRes.json()) as { needed: string[] };
+
+      if (needed.length === 0) {
+        toast.success("All exchange rates already cached");
+        setSyncing(false);
+        return;
+      }
+
+      setSyncProgress({ done: 0, total: needed.length });
+
+      const BATCH_SIZE = 30;
+      let done = 0;
+
+      for (let i = 0; i < needed.length; i += BATCH_SIZE) {
+        const batch = needed.slice(i, i + BATCH_SIZE);
+        await fetch("/api/exchange-rates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dates: batch }),
+        });
+        done += batch.length;
+        setSyncProgress({ done, total: needed.length });
+      }
+
+      toast.success(`Fetched ${needed.length} exchange rates`);
+      // Reload page to refresh dashboard data with new rates
+      window.location.reload();
+    } catch {
+      toast.error("Failed to sync exchange rates");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  return (
+    <aside
+      className={cn(
+        "flex h-screen flex-col border-r bg-background transition-all duration-200",
+        collapsed ? "w-16" : "w-64"
+      )}
+    >
+      <div className="flex h-14 items-center border-b px-3 justify-between">
+        {!collapsed && (
+          <h1 className="text-lg font-semibold truncate px-2">Big Picture Finance</h1>
+        )}
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="flex items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? icons.ChevronRight : icons.ChevronLeft}
+        </button>
+      </div>
+      <nav className="flex-1 space-y-1 p-2">
+        {navItems.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            title={collapsed ? item.label : undefined}
+            className={cn(
+              "flex items-center rounded-md py-2 text-sm font-medium transition-colors",
+              collapsed ? "justify-center px-2" : "gap-3 px-3",
+              pathname === item.href
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            )}
+          >
+            {icons[item.icon]}
+            {!collapsed && item.label}
+          </Link>
+        ))}
+      </nav>
+      <div className="border-t p-2 space-y-1">
+        <Link
+          href="/excluded"
+          title={collapsed ? "Excluded" : undefined}
+          className={cn(
+            "flex items-center rounded-md py-2 text-sm font-medium transition-colors",
+            collapsed ? "justify-center px-2" : "gap-3 px-3",
+            pathname === "/excluded"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          )}
+        >
+          {icons.EyeOff}
+          {!collapsed && "Excluded"}
+        </Link>
+        <button
+          onClick={syncRates}
+          disabled={syncing}
+          title={collapsed ? (syncing ? `Syncing ${syncProgress.done}/${syncProgress.total}` : "Sync Exchange Rates") : undefined}
+          className={cn(
+            "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full",
+            collapsed ? "justify-center px-2" : "gap-3 px-3",
+            "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+            syncing && "animate-pulse"
+          )}
+        >
+          <span className={syncing ? "animate-spin" : ""}>{icons.RefreshCw}</span>
+          {!collapsed && (
+            <span className="truncate">
+              {syncing
+                ? syncProgress.total > 0
+                  ? `${syncProgress.done}/${syncProgress.total}`
+                  : "Checking..."
+                : "Sync Rates"}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={async () => {
+            await fetch("/api/auth", { method: "DELETE" });
+            router.push("/login");
+          }}
+          title={collapsed ? "Logout" : undefined}
+          className={cn(
+            "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full",
+            collapsed ? "justify-center px-2" : "gap-3 px-3",
+            "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          )}
+        >
+          {icons.LogOut}
+          {!collapsed && "Logout"}
+        </button>
+      </div>
+    </aside>
+  );
+}
