@@ -52,6 +52,21 @@ export async function GET(request: NextRequest) {
     DISPLAY_CURRENCY
   );
 
+  // Compute USD→ILS rates (inverse of ILS→USD) for ILS total calculations
+  // Also fetch rates for USD transaction dates
+  const usdDates = txns
+    .filter((tx) => tx.currency === "USD")
+    .map((tx) => tx.date);
+  const usdIlsRatesRaw = await getExchangeRatesForDates(
+    usdDates,
+    "ILS",
+    "USD"
+  );
+  const usdToIlsRates = new Map<string, number>();
+  for (const [date, rate] of usdIlsRatesRaw) {
+    usdToIlsRates.set(date, rate > 0 ? 1 / rate : 0);
+  }
+
   // Get manual income entries
   const incomeEntries = await db.select().from(manualIncomeEntries);
 
@@ -76,7 +91,8 @@ export async function GET(request: NextRequest) {
     incomeGroups[key].push(entry);
   }
 
-  // First pass: collect ILS months
+  // First pass: collect months that need rate conversion
+  const usdIncomeMonths: string[] = [];
   for (const entries of Object.values(incomeGroups)) {
     entries.sort((a, b) => a.startDate.localeCompare(b.startDate));
     for (
@@ -90,8 +106,10 @@ export async function GET(request: NextRequest) {
         if (entry.startDate <= monthStr) applicable = entry;
       }
       if (applicable && applicable.currency === "ILS") {
-        // Use first of month as rate date
         ilsIncomeMonths.push(`${monthStr}-01`);
+      }
+      if (applicable && applicable.currency === "USD") {
+        usdIncomeMonths.push(`${monthStr}-01`);
       }
     }
   }
@@ -101,6 +119,16 @@ export async function GET(request: NextRequest) {
     "ILS",
     DISPLAY_CURRENCY
   );
+  // USD→ILS rates for manual income (inverse of ILS→USD)
+  const usdIncomeIlsRatesRaw = await getExchangeRatesForDates(
+    usdIncomeMonths,
+    "ILS",
+    "USD"
+  );
+  const usdIncomeToIlsRates = new Map<string, number>();
+  for (const [date, rate] of usdIncomeIlsRatesRaw) {
+    usdIncomeToIlsRates.set(date, rate > 0 ? 1 / rate : 0);
+  }
 
   // Second pass: calculate with conversion
   for (const entries of Object.values(incomeGroups)) {
@@ -124,15 +152,18 @@ export async function GET(request: NextRequest) {
           const rate = ilsIncomeRates.get(`${monthStr}-01`) ?? 1;
           amount *= rate;
           totalUSDFromILS += amount;
+          incomeBySourceILS[applicable.source] =
+            (incomeBySourceILS[applicable.source] ?? 0) + rawAmount;
+        } else {
+          // USD manual income → convert to ILS for ILS totals
+          const ilsRate = usdIncomeToIlsRates.get(`${monthStr}-01`) ?? 0;
+          totalManualIncomeILS += rawAmount * ilsRate;
+          incomeBySourceILS[applicable.source] =
+            (incomeBySourceILS[applicable.source] ?? 0) + rawAmount * ilsRate;
         }
         totalManualIncome += amount;
         incomeBySource[applicable.source] =
           (incomeBySource[applicable.source] ?? 0) + amount;
-        // Track ILS equivalent per source (convert USD to ILS using inverse rate)
-        if (applicable.currency === "ILS") {
-          incomeBySourceILS[applicable.source] =
-            (incomeBySourceILS[applicable.source] ?? 0) + rawAmount;
-        }
         incomeByOwner[applicable.owner] =
           (incomeByOwner[applicable.owner] ?? 0) + amount;
       }
@@ -185,6 +216,10 @@ export async function GET(request: NextRequest) {
           monthlyData[monthStr].incomeILS += rawAmount;
           const rate = ilsIncomeRates.get(`${monthStr}-01`) ?? 1;
           amount = rawAmount * rate;
+        } else {
+          // USD manual income → convert to ILS for monthly ILS tracking
+          const ilsRate = usdIncomeToIlsRates.get(`${monthStr}-01`) ?? 0;
+          monthlyData[monthStr].incomeILS += rawAmount * ilsRate;
         }
         monthlyData[monthStr].income += amount;
       }
@@ -213,9 +248,21 @@ export async function GET(request: NextRequest) {
       amount *= rate;
       totalUSDFromILS += Math.abs(amount);
       monthlyData[month].usdFromILS += Math.abs(amount);
+    } else {
+      // USD transactions → convert to ILS for ILS totals
+      const ilsRate = usdToIlsRates.get(tx.date) ?? 0;
+      const ilsEquiv = rawAmount * ilsRate;
+      if (rawAmount < 0) {
+        totalExpensesILS += Math.abs(ilsEquiv);
+      } else {
+        totalTransactionIncomeILS += ilsEquiv;
+      }
     }
 
     const isILS = tx.currency === "ILS";
+    const ilsEquiv = tx.currency === "USD"
+      ? Math.abs(rawAmount) * (usdToIlsRates.get(tx.date) ?? 0)
+      : Math.abs(rawAmount);
 
     if (amount < 0) {
       const absAmount = Math.abs(amount);
@@ -224,11 +271,9 @@ export async function GET(request: NextRequest) {
       const category = tx.category ?? "Uncategorized";
       expensesByCategory[category] =
         (expensesByCategory[category] ?? 0) + absAmount;
-      if (isILS) {
-        expensesByCategoryILS[category] =
-          (expensesByCategoryILS[category] ?? 0) + absRaw;
-        monthlyData[month].expensesILS += absRaw;
-      }
+      expensesByCategoryILS[category] =
+        (expensesByCategoryILS[category] ?? 0) + (isILS ? absRaw : ilsEquiv);
+      monthlyData[month].expensesILS += isILS ? absRaw : ilsEquiv;
       // Track per-merchant spend within category
       const merchantKey = tx.description
         .toLowerCase()
@@ -244,9 +289,7 @@ export async function GET(request: NextRequest) {
       if (tx.isRecurring) {
         merchantsByCategory[category][merchantKey].recurringCount += 1;
       }
-      if (isILS) {
-        merchantsByCategory[category][merchantKey].ils += absRaw;
-      }
+      merchantsByCategory[category][merchantKey].ils += ilsEquiv;
       expensesByOwner[owner] = (expensesByOwner[owner] ?? 0) + absAmount;
       monthlyData[month].expenses += absAmount;
 
@@ -254,13 +297,11 @@ export async function GET(request: NextRequest) {
         eventExpenses[String(tx.eventId)] =
           (eventExpenses[String(tx.eventId)] ?? 0) + absAmount;
         eventTxCounts[String(tx.eventId)] = (eventTxCounts[String(tx.eventId)] ?? 0) + 1;
-        if (isILS) {
-          eventExpensesILS[String(tx.eventId)] =
-            (eventExpensesILS[String(tx.eventId)] ?? 0) + absRaw;
-        }
+        eventExpensesILS[String(tx.eventId)] =
+          (eventExpensesILS[String(tx.eventId)] ?? 0) + ilsEquiv;
       } else {
         normalExpenses += absAmount;
-        if (isILS) normalExpensesILS += absRaw;
+        normalExpensesILS += ilsEquiv;
         if (tx.isRecurring) {
           recurringExpenses += absAmount;
           recurringByCategory[category] = (recurringByCategory[category] ?? 0) + absAmount;
@@ -274,11 +315,10 @@ export async function GET(request: NextRequest) {
     } else {
       totalTransactionIncome += amount;
       monthlyData[month].income += amount;
-      if (isILS) {
-        monthlyData[month].incomeILS += rawAmount;
-        incomeBySourceILS["deposits"] =
-          (incomeBySourceILS["deposits"] ?? 0) + rawAmount;
-      }
+      const incIlsEquiv = isILS ? rawAmount : rawAmount * (usdToIlsRates.get(tx.date) ?? 0);
+      monthlyData[month].incomeILS += incIlsEquiv;
+      incomeBySourceILS["deposits"] =
+        (incomeBySourceILS["deposits"] ?? 0) + incIlsEquiv;
       incomeBySource["deposits"] =
         (incomeBySource["deposits"] ?? 0) + amount;
       incomeByOwner[owner] = (incomeByOwner[owner] ?? 0) + amount;

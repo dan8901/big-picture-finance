@@ -5,6 +5,8 @@ import {
   manualIncomeEntries,
   events,
   netWorthSnapshots,
+  goals,
+  goalAchievements,
 } from "@/db/schema";
 import { eq, and, gte, lte, sql, isNull, desc, asc } from "drizzle-orm";
 import { getExchangeRatesForDates } from "@/lib/exchange";
@@ -189,6 +191,54 @@ export const toolDefinitions: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_goals",
+      description:
+        "Get financial goals (budget caps, savings targets, savings amounts). Returns goal config, streak count, and recent achievement history. Use this to understand what goals exist and how they are performing.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            enum: ["budget_cap", "savings_target", "savings_amount"],
+            description: "Filter by goal type",
+          },
+          category: { type: "string", description: "Filter by category (e.g. 'Food & Groceries')" },
+          owner: { type: "string", description: "Filter by owner" },
+          period: {
+            type: "string",
+            enum: ["monthly", "annual"],
+            description: "Filter by goal period",
+          },
+          activeOnly: {
+            type: "boolean",
+            description: "Only return active goals (default true)",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_goal_achievements",
+      description:
+        "Get goal achievement history — whether goals were met or missed in each period, with actual vs target amounts. Use this to analyze goal performance over time. Periods are formatted as 'YYYY-MM' for monthly goals and 'YYYY' for annual goals.",
+      parameters: {
+        type: "object",
+        properties: {
+          goalId: { type: "number", description: "Filter to a specific goal by ID" },
+          goalName: { type: "string", description: "Filter by goal name (case-insensitive substring match)" },
+          startPeriod: { type: "string", description: "Start period (e.g. '2025-01' or '2025')" },
+          endPeriod: { type: "string", description: "End period" },
+          achievedOnly: { type: "boolean", description: "Filter to achieved (true) or missed (false) only" },
+          limit: { type: "number", description: "Max results (default 20)" },
+        },
+      },
+    },
+  },
 ];
 
 // ── Helper: convert ILS amounts to USD ──
@@ -247,6 +297,10 @@ export async function executeTool(
       return getNetWorthHistory(params);
     case "get_financial_summary":
       return getFinancialSummary(params);
+    case "get_goals":
+      return getGoals(params);
+    case "get_goal_achievements":
+      return getGoalAchievements(params);
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -1040,4 +1094,142 @@ async function getFinancialSummary(params: ToolParams) {
     events: eventSummaries,
     owners,
   };
+}
+
+async function getGoals(params: ToolParams) {
+  const {
+    type,
+    category,
+    owner,
+    period,
+    activeOnly = true,
+  } = params as {
+    type?: string;
+    category?: string;
+    owner?: string;
+    period?: string;
+    activeOnly?: boolean;
+  };
+
+  const conditions = [];
+  if (activeOnly) conditions.push(eq(goals.isActive, 1));
+  if (type) conditions.push(sql`${goals.type} = ${type}`);
+  if (category) conditions.push(sql`lower(${goals.category}) = ${category.toLowerCase()}`);
+  if (owner) conditions.push(sql`lower(${goals.owner}) = ${owner.toLowerCase()}`);
+  if (period) conditions.push(sql`${goals.period} = ${period}`);
+
+  const allGoals = await db
+    .select()
+    .from(goals)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(goals.sortOrder, desc(goals.createdAt))
+    .limit(20);
+
+  const results = [];
+  for (const goal of allGoals) {
+    const achievements = await db
+      .select()
+      .from(goalAchievements)
+      .where(eq(goalAchievements.goalId, goal.id))
+      .orderBy(desc(goalAchievements.period));
+
+    // Compute streak (consecutive achieved from most recent)
+    let streak = 0;
+    for (const a of achievements) {
+      if (a.achieved === 1) streak++;
+      else break;
+    }
+
+    const recentHistory = achievements.slice(0, 6).map((a) => ({
+      period: a.period,
+      achieved: a.achieved === 1,
+      actualAmount: parseFloat(a.actualAmount),
+    }));
+
+    results.push({
+      id: goal.id,
+      name: goal.name,
+      type: goal.type,
+      scope: goal.scope,
+      category: goal.category,
+      owner: goal.owner,
+      targetAmount: parseFloat(goal.targetAmount),
+      currency: goal.currency,
+      period: goal.period,
+      isActive: goal.isActive === 1,
+      streak,
+      recentHistory,
+    });
+  }
+
+  return results;
+}
+
+async function getGoalAchievements(params: ToolParams) {
+  const {
+    goalId,
+    goalName,
+    startPeriod,
+    endPeriod,
+    achievedOnly,
+    limit = 20,
+  } = params as {
+    goalId?: number;
+    goalName?: string;
+    startPeriod?: string;
+    endPeriod?: string;
+    achievedOnly?: boolean;
+    limit?: number;
+  };
+
+  const conditions = [];
+  if (goalId) conditions.push(eq(goalAchievements.goalId, goalId));
+  if (startPeriod) conditions.push(gte(goalAchievements.period, startPeriod));
+  if (endPeriod) conditions.push(lte(goalAchievements.period, endPeriod));
+  if (achievedOnly === true) conditions.push(eq(goalAchievements.achieved, 1));
+  if (achievedOnly === false) conditions.push(eq(goalAchievements.achieved, 0));
+  if (goalName) {
+    conditions.push(
+      sql`${goalAchievements.goalId} IN (SELECT id FROM goals WHERE lower(name) LIKE ${`%${goalName.toLowerCase()}%`})`
+    );
+  }
+
+  const rows = await db
+    .select({
+      id: goalAchievements.id,
+      goalId: goalAchievements.goalId,
+      period: goalAchievements.period,
+      achieved: goalAchievements.achieved,
+      actualAmount: goalAchievements.actualAmount,
+      goalName: goals.name,
+      goalType: goals.type,
+      category: goals.category,
+      targetAmount: goals.targetAmount,
+      currency: goals.currency,
+    })
+    .from(goalAchievements)
+    .innerJoin(goals, eq(goalAchievements.goalId, goals.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(goalAchievements.period))
+    .limit(Math.min(limit, 50));
+
+  return rows.map((r) => {
+    const actual = parseFloat(r.actualAmount);
+    const target = parseFloat(r.targetAmount);
+    // Positive variance = good. For budget_cap, under budget is good. For savings, over target is good.
+    const variance = r.goalType === "budget_cap" ? target - actual : actual - target;
+
+    return {
+      goalId: r.goalId,
+      goalName: r.goalName,
+      goalType: r.goalType,
+      category: r.category,
+      period: r.period,
+      achieved: r.achieved === 1,
+      actualAmount: actual,
+      targetAmount: target,
+      currency: r.currency,
+      variance: Math.round(variance * 100) / 100,
+    };
+  });
 }

@@ -10,7 +10,31 @@ import {
 import { sql, eq, and, desc } from "drizzle-orm";
 import { getExchangeRatesForDates } from "@/lib/exchange";
 
-const DISPLAY_CURRENCY = "USD";
+// Convert transaction amounts to the goal's currency.
+// Only ILS→USD rates are stored in the DB, so for USD→ILS we fetch ILS→USD and invert.
+async function convertToGoalCurrency(
+  txns: Array<{ amount: string; currency: string; date: string }>,
+  goalCurrency: string
+): Promise<Map<string, number>> {
+  const needConversion = txns.filter((t) => t.currency !== goalCurrency);
+  const convDates = needConversion.map((t) => t.date);
+  if (convDates.length === 0) return new Map();
+
+  // Always fetch ILS→USD (what's in the DB)
+  const ilsToUsd = await getExchangeRatesForDates(convDates, "ILS", "USD");
+
+  if (goalCurrency === "USD") {
+    // Converting ILS→USD: use rates directly
+    return ilsToUsd;
+  } else {
+    // Converting USD→ILS: invert the ILS→USD rate
+    const usdToIls = new Map<string, number>();
+    for (const [date, rate] of ilsToUsd) {
+      usdToIls.set(date, rate > 0 ? 1 / rate : 0);
+    }
+    return usdToIls;
+  }
+}
 
 // Compute actual spending for a budget_cap goal in a given period
 async function computeBudgetAmount(
@@ -51,15 +75,12 @@ async function computeBudgetAmount(
     .from(transactions)
     .where(and(...conditions));
 
-  const ilsDates = txns
-    .filter((t) => t.currency === "ILS")
-    .map((t) => t.date);
-  const rates = await getExchangeRatesForDates(ilsDates, "ILS", DISPLAY_CURRENCY);
+  const rates = await convertToGoalCurrency(txns, goal.currency);
 
   let total = 0;
   for (const tx of txns) {
     let amt = Math.abs(parseFloat(tx.amount));
-    if (tx.currency === "ILS") {
+    if (tx.currency !== goal.currency) {
       amt *= rates.get(tx.date) ?? 1;
     }
     total += amt;
@@ -74,10 +95,17 @@ async function computeSavingsAmount(
   periodStart: string,
   periodEnd: string
 ): Promise<{ savings: number; income: number; expenses: number }> {
+  // Cap at end of previous month so partial months don't inflate savings
+  // (manual income is a full-month lump sum, but expenses are partial)
+  const now = new Date();
+  const endOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  const endOfPrevMonthStr = `${endOfPrevMonth.getFullYear()}-${String(endOfPrevMonth.getMonth() + 1).padStart(2, "0")}-${String(endOfPrevMonth.getDate()).padStart(2, "0")}`;
+  const cappedEnd = periodEnd < endOfPrevMonthStr ? periodEnd : endOfPrevMonthStr;
+
   // Get expenses
   const expConditions = [
     sql`${transactions.date} >= ${periodStart}`,
-    sql`${transactions.date} <= ${periodEnd}`,
+    sql`${transactions.date} <= ${cappedEnd}`,
     eq(transactions.excluded, 0),
     sql`CAST(${transactions.amount} AS numeric) < 0`,
   ];
@@ -104,16 +132,13 @@ async function computeSavingsAmount(
     .from(transactions)
     .where(and(...expConditions));
 
-  const ilsDates = expTxns
-    .filter((t) => t.currency === "ILS")
-    .map((t) => t.date);
-  const rates = await getExchangeRatesForDates(ilsDates, "ILS", DISPLAY_CURRENCY);
+  const expRates = await convertToGoalCurrency(expTxns, goal.currency);
 
   let totalExpenses = 0;
   for (const tx of expTxns) {
     let amt = Math.abs(parseFloat(tx.amount));
-    if (tx.currency === "ILS") {
-      amt *= rates.get(tx.date) ?? 1;
+    if (tx.currency !== goal.currency) {
+      amt *= expRates.get(tx.date) ?? 1;
     }
     totalExpenses += amt;
   }
@@ -122,7 +147,7 @@ async function computeSavingsAmount(
   const incomeEntries = await db.select().from(manualIncomeEntries);
   const rangeStart = new Date(periodStart);
   const rangeEnd = new Date(
-    Math.min(new Date(periodEnd).getTime(), Date.now())
+    Math.min(new Date(cappedEnd).getTime(), endOfPrevMonth.getTime())
   );
 
   const incomeGroups: Record<string, (typeof incomeEntries)[number][]> = {};
@@ -133,7 +158,8 @@ async function computeSavingsAmount(
     incomeGroups[key].push(entry);
   }
 
-  const ilsIncomeMonths: string[] = [];
+  // Collect dates for income entries that need conversion
+  const incomeConvDates: string[] = [];
   for (const entries of Object.values(incomeGroups)) {
     entries.sort((a, b) => a.startDate.localeCompare(b.startDate));
     for (
@@ -146,17 +172,26 @@ async function computeSavingsAmount(
       for (const entry of entries) {
         if (entry.startDate <= monthStr) applicable = entry;
       }
-      if (applicable?.currency === "ILS") {
-        ilsIncomeMonths.push(`${monthStr}-01`);
+      if (applicable && applicable.currency !== goal.currency) {
+        incomeConvDates.push(`${monthStr}-01`);
       }
     }
   }
 
-  const ilsIncomeRates = await getExchangeRatesForDates(
-    ilsIncomeMonths,
-    "ILS",
-    DISPLAY_CURRENCY
-  );
+  // Always fetch ILS→USD and invert if needed (only ILS→USD rates are stored)
+  const incomeConvRatesRaw =
+    incomeConvDates.length > 0
+      ? await getExchangeRatesForDates(incomeConvDates, "ILS", "USD")
+      : new Map<string, number>();
+  let incomeConvRates: Map<string, number>;
+  if (goal.currency === "USD") {
+    incomeConvRates = incomeConvRatesRaw;
+  } else {
+    incomeConvRates = new Map<string, number>();
+    for (const [date, rate] of incomeConvRatesRaw) {
+      incomeConvRates.set(date, rate > 0 ? 1 / rate : 0);
+    }
+  }
 
   let totalIncome = 0;
   for (const entries of Object.values(incomeGroups)) {
@@ -173,8 +208,8 @@ async function computeSavingsAmount(
       }
       if (applicable) {
         let amount = parseFloat(applicable.monthlyAmount);
-        if (applicable.currency === "ILS") {
-          const rate = ilsIncomeRates.get(`${monthStr}-01`) ?? 1;
+        if (applicable.currency !== goal.currency) {
+          const rate = incomeConvRates.get(`${monthStr}-01`) ?? 1;
           amount *= rate;
         }
         totalIncome += amount;
@@ -185,7 +220,7 @@ async function computeSavingsAmount(
   // Also add transaction income (positive amounts)
   const incConditions = [
     sql`${transactions.date} >= ${periodStart}`,
-    sql`${transactions.date} <= ${periodEnd}`,
+    sql`${transactions.date} <= ${cappedEnd}`,
     eq(transactions.excluded, 0),
     sql`CAST(${transactions.amount} AS numeric) > 0`,
   ];
@@ -210,18 +245,11 @@ async function computeSavingsAmount(
     .from(transactions)
     .where(and(...incConditions));
 
-  const ilsIncDates = incTxns
-    .filter((t) => t.currency === "ILS")
-    .map((t) => t.date);
-  const incRates = await getExchangeRatesForDates(
-    ilsIncDates,
-    "ILS",
-    DISPLAY_CURRENCY
-  );
+  const incTxRates = await convertToGoalCurrency(incTxns, goal.currency);
   for (const tx of incTxns) {
     let amt = parseFloat(tx.amount);
-    if (tx.currency === "ILS") {
-      amt *= incRates.get(tx.date) ?? 1;
+    if (tx.currency !== goal.currency) {
+      amt *= incTxRates.get(tx.date) ?? 1;
     }
     totalIncome += amt;
   }
@@ -264,7 +292,18 @@ export async function GET() {
   const allGoals = await db
     .select()
     .from(goals)
-    .orderBy(desc(goals.createdAt));
+    .orderBy(goals.sortOrder, desc(goals.createdAt));
+
+  // Get the date of the last available transaction for pace calculation (budget goals)
+  const [lastTxResult] = await db
+    .select({ maxDate: sql<string>`MAX(${transactions.date})` })
+    .from(transactions)
+    .where(eq(transactions.excluded, 0));
+  const lastTxDate = lastTxResult?.maxDate ? new Date(lastTxResult.maxDate) : new Date();
+
+  // Savings goals are capped at end of previous month
+  const nowDate = new Date();
+  const endOfPrevMonth = new Date(nowDate.getFullYear(), nowDate.getMonth(), 0);
 
   const results = [];
 
@@ -275,27 +314,40 @@ export async function GET() {
     let progress = 0;
     let status: "on_track" | "at_risk" | "exceeded" | "achieved" = "on_track";
 
+    // For annual goals, compute pace fraction
+    // Budget goals: based on last transaction date (real-time)
+    // Savings goals: based on end of previous month (their data cap)
+    const paceDate = goal.type === "budget_cap" ? lastTxDate : endOfPrevMonth;
+    const paceFraction = goal.period === "annual"
+      ? Math.min((paceDate.getMonth() + 1) / 12, 1)
+      : 1;
+
     if (goal.type === "budget_cap") {
       currentAmount = await computeBudgetAmount(goal, start, end);
       const target = parseFloat(goal.targetAmount);
       progress = target > 0 ? (currentAmount / target) * 100 : 0;
+      // For budget caps, compare spending against pace-adjusted budget
+      const paceProgress = paceFraction > 0 ? progress / paceFraction : progress;
 
       if (progress >= 100) status = "exceeded";
-      else if (progress >= 80) status = "at_risk";
+      else if (paceProgress >= 80) status = "at_risk";
       else status = "on_track";
     } else if (goal.type === "savings_amount") {
       const result = await computeSavingsAmount(goal, start, end);
-      currentAmount = result.income - result.expenses; // Absolute amount saved (USD)
+      currentAmount = result.income - result.expenses;
       const target = parseFloat(goal.targetAmount);
       progress = target > 0 ? (currentAmount / target) * 100 : 0;
+      // Compare savings against pace-adjusted target
+      const paceProgress = paceFraction > 0 ? progress / paceFraction : progress;
 
       if (currentAmount >= target) status = "achieved";
-      else if (progress >= 95) status = "on_track";
-      else if (progress >= 70) status = "at_risk";
+      else if (paceProgress >= 95) status = "on_track";
+      else if (paceProgress >= 70) status = "at_risk";
       else status = "exceeded";
     } else {
+      // savings_target (percentage) — not pace-dependent, rate is rate
       const result = await computeSavingsAmount(goal, start, end);
-      currentAmount = result.savings; // This is a percentage
+      currentAmount = result.savings;
       const target = parseFloat(goal.targetAmount);
       progress = target > 0 ? (currentAmount / target) * 100 : 0;
 
@@ -348,6 +400,11 @@ export async function POST(request: NextRequest) {
   const { name, type, scope, category, owner, targetAmount, currency, period } =
     body;
 
+  const [maxResult] = await db
+    .select({ maxOrder: sql<number>`COALESCE(MAX(${goals.sortOrder}), -1)` })
+    .from(goals);
+  const nextOrder = (maxResult?.maxOrder ?? -1) + 1;
+
   const [created] = await db
     .insert(goals)
     .values({
@@ -359,6 +416,7 @@ export async function POST(request: NextRequest) {
       targetAmount: String(targetAmount),
       currency,
       period,
+      sortOrder: nextOrder,
     })
     .returning();
 

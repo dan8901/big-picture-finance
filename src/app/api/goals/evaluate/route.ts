@@ -10,8 +10,6 @@ import {
 import { sql, eq, and } from "drizzle-orm";
 import { getExchangeRatesForDates } from "@/lib/exchange";
 
-const DISPLAY_CURRENCY = "USD";
-
 function getPeriodDatesFromLabel(label: string, period: string) {
   if (period === "monthly") {
     const [year, month] = label.split("-").map(Number);
@@ -21,6 +19,30 @@ function getPeriodDatesFromLabel(label: string, period: string) {
     return { start, end };
   } else {
     return { start: `${label}-01-01`, end: `${label}-12-31` };
+  }
+}
+
+// Convert transaction amounts to the goal's currency.
+// Only ILS→USD rates are stored in the DB, so for USD→ILS we fetch ILS→USD and invert.
+async function convertToGoalCurrency(
+  txns: Array<{ amount: string; currency: string; date: string }>,
+  goalCurrency: string
+): Promise<Map<string, number>> {
+  const needConversion = txns.filter((t) => t.currency !== goalCurrency);
+  const convDates = needConversion.map((t) => t.date);
+  if (convDates.length === 0) return new Map();
+
+  // Always fetch ILS→USD (what's in the DB)
+  const ilsToUsd = await getExchangeRatesForDates(convDates, "ILS", "USD");
+
+  if (goalCurrency === "USD") {
+    return ilsToUsd;
+  } else {
+    const usdToIls = new Map<string, number>();
+    for (const [date, rate] of ilsToUsd) {
+      usdToIls.set(date, rate > 0 ? 1 / rate : 0);
+    }
+    return usdToIls;
   }
 }
 
@@ -64,15 +86,12 @@ async function computeBudgetAmount(
     .from(transactions)
     .where(and(...conditions));
 
-  const ilsDates = txns
-    .filter((t) => t.currency === "ILS")
-    .map((t) => t.date);
-  const rates = await getExchangeRatesForDates(ilsDates, "ILS", DISPLAY_CURRENCY);
+  const rates = await convertToGoalCurrency(txns, goal.currency);
 
   let total = 0;
   for (const tx of txns) {
     let amt = Math.abs(parseFloat(tx.amount));
-    if (tx.currency === "ILS") {
+    if (tx.currency !== goal.currency) {
       amt *= rates.get(tx.date) ?? 1;
     }
     total += amt;
@@ -86,10 +105,16 @@ async function computeSavingsRate(
   periodStart: string,
   periodEnd: string
 ): Promise<{ rate: number; income: number; expenses: number }> {
+  // Cap at end of previous month so partial months don't inflate savings
+  const now = new Date();
+  const endOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  const endOfPrevMonthStr = `${endOfPrevMonth.getFullYear()}-${String(endOfPrevMonth.getMonth() + 1).padStart(2, "0")}-${String(endOfPrevMonth.getDate()).padStart(2, "0")}`;
+  const cappedEnd = periodEnd < endOfPrevMonthStr ? periodEnd : endOfPrevMonthStr;
+
   // Expenses
   const expConditions = [
     sql`${transactions.date} >= ${periodStart}`,
-    sql`${transactions.date} <= ${periodEnd}`,
+    sql`${transactions.date} <= ${cappedEnd}`,
     eq(transactions.excluded, 0),
     sql`CAST(${transactions.amount} AS numeric) < 0`,
   ];
@@ -116,16 +141,13 @@ async function computeSavingsRate(
     .from(transactions)
     .where(and(...expConditions));
 
-  const ilsDates = expTxns
-    .filter((t) => t.currency === "ILS")
-    .map((t) => t.date);
-  const rates = await getExchangeRatesForDates(ilsDates, "ILS", DISPLAY_CURRENCY);
+  const expRates = await convertToGoalCurrency(expTxns, goal.currency);
 
   let totalExpenses = 0;
   for (const tx of expTxns) {
     let amt = Math.abs(parseFloat(tx.amount));
-    if (tx.currency === "ILS") {
-      amt *= rates.get(tx.date) ?? 1;
+    if (tx.currency !== goal.currency) {
+      amt *= expRates.get(tx.date) ?? 1;
     }
     totalExpenses += amt;
   }
@@ -134,7 +156,7 @@ async function computeSavingsRate(
   const incomeEntries = await db.select().from(manualIncomeEntries);
   const rangeStart = new Date(periodStart);
   const rangeEnd = new Date(
-    Math.min(new Date(periodEnd).getTime(), Date.now())
+    Math.min(new Date(cappedEnd).getTime(), endOfPrevMonth.getTime())
   );
 
   const incomeGroups: Record<string, (typeof incomeEntries)[number][]> = {};
@@ -145,7 +167,7 @@ async function computeSavingsRate(
     incomeGroups[key].push(entry);
   }
 
-  const ilsIncomeMonths: string[] = [];
+  const incomeConvDates: string[] = [];
   for (const entries of Object.values(incomeGroups)) {
     entries.sort((a, b) => a.startDate.localeCompare(b.startDate));
     for (
@@ -158,17 +180,26 @@ async function computeSavingsRate(
       for (const entry of entries) {
         if (entry.startDate <= monthStr) applicable = entry;
       }
-      if (applicable?.currency === "ILS") {
-        ilsIncomeMonths.push(`${monthStr}-01`);
+      if (applicable && applicable.currency !== goal.currency) {
+        incomeConvDates.push(`${monthStr}-01`);
       }
     }
   }
 
-  const ilsIncomeRates = await getExchangeRatesForDates(
-    ilsIncomeMonths,
-    "ILS",
-    DISPLAY_CURRENCY
-  );
+  // Always fetch ILS→USD and invert if needed (only ILS→USD rates are stored)
+  const incomeConvRatesRaw =
+    incomeConvDates.length > 0
+      ? await getExchangeRatesForDates(incomeConvDates, "ILS", "USD")
+      : new Map<string, number>();
+  let incomeConvRates: Map<string, number>;
+  if (goal.currency === "USD") {
+    incomeConvRates = incomeConvRatesRaw;
+  } else {
+    incomeConvRates = new Map<string, number>();
+    for (const [date, rate] of incomeConvRatesRaw) {
+      incomeConvRates.set(date, rate > 0 ? 1 / rate : 0);
+    }
+  }
 
   let totalIncome = 0;
   for (const entries of Object.values(incomeGroups)) {
@@ -185,8 +216,8 @@ async function computeSavingsRate(
       }
       if (applicable) {
         let amount = parseFloat(applicable.monthlyAmount);
-        if (applicable.currency === "ILS") {
-          const rate = ilsIncomeRates.get(`${monthStr}-01`) ?? 1;
+        if (applicable.currency !== goal.currency) {
+          const rate = incomeConvRates.get(`${monthStr}-01`) ?? 1;
           amount *= rate;
         }
         totalIncome += amount;
@@ -197,7 +228,7 @@ async function computeSavingsRate(
   // Transaction income
   const incConditions = [
     sql`${transactions.date} >= ${periodStart}`,
-    sql`${transactions.date} <= ${periodEnd}`,
+    sql`${transactions.date} <= ${cappedEnd}`,
     eq(transactions.excluded, 0),
     sql`CAST(${transactions.amount} AS numeric) > 0`,
   ];
@@ -222,18 +253,11 @@ async function computeSavingsRate(
     .from(transactions)
     .where(and(...incConditions));
 
-  const ilsIncDates = incTxns
-    .filter((t) => t.currency === "ILS")
-    .map((t) => t.date);
-  const incRates = await getExchangeRatesForDates(
-    ilsIncDates,
-    "ILS",
-    DISPLAY_CURRENCY
-  );
+  const incTxRates = await convertToGoalCurrency(incTxns, goal.currency);
   for (const tx of incTxns) {
     let amt = parseFloat(tx.amount);
-    if (tx.currency === "ILS") {
-      amt *= incRates.get(tx.date) ?? 1;
+    if (tx.currency !== goal.currency) {
+      amt *= incTxRates.get(tx.date) ?? 1;
     }
     totalIncome += amt;
   }

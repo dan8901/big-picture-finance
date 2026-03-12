@@ -154,6 +154,7 @@ export const goals = pgTable("goals", {
   currency: text("currency", { enum: ["USD", "ILS"] }).notNull(),
   period: text("period", { enum: ["monthly", "annual"] }).notNull(),
   isActive: integer("is_active").default(1).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

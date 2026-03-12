@@ -8,18 +8,40 @@ import {
   ResponsiveContainer,
   YAxis,
 } from "recharts";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  rectSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function formatPeriod(period: string) {
+  // "2025-09" → "Sep 2025", "2025" → "2025"
+  const parts = period.split("-");
+  if (parts.length === 2) {
+    return `${MONTH_SHORT[parseInt(parts[1], 10) - 1]} ${parts[0]}`;
+  }
+  return period;
+}
 
 const CATEGORIES = [
-  "Food & Groceries",
-  "Restaurants & Cafes",
+  "Food & Dining",
   "Transportation",
   "Housing & Utilities",
-  "Health & Medical",
+  "Health & Insurance",
   "Shopping & Clothing",
   "Entertainment & Leisure",
-  "Subscriptions",
-  "Insurance",
-  "Education",
   "Transfers",
   "Government & Taxes",
   "Other",
@@ -334,6 +356,35 @@ function GoalCard({
   );
 }
 
+function SortableGoalCard(props: {
+  goal: GoalData;
+  onDelete: (id: number) => void;
+  onToggle: (id: number, active: boolean) => void;
+  onEdit: (goal: GoalData) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.goal.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <GoalCard {...props} />
+    </div>
+  );
+}
+
 function CreateGoalDialog({
   open,
   onClose,
@@ -351,7 +402,7 @@ function CreateGoalDialog({
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [owner, setOwner] = useState("");
   const [targetAmount, setTargetAmount] = useState("");
-  const [currency, setCurrency] = useState("USD");
+  const [currency, setCurrency] = useState("ILS");
   const [period, setPeriod] = useState<"monthly" | "annual">("monthly");
   const [saving, setSaving] = useState(false);
 
@@ -412,9 +463,11 @@ function CreateGoalDialog({
               <label className="text-sm font-medium">Type</label>
               <select
                 value={type}
-                onChange={(e) =>
-                  setType(e.target.value as "budget_cap" | "savings_target" | "savings_amount")
-                }
+                onChange={(e) => {
+                  const v = e.target.value as "budget_cap" | "savings_target" | "savings_amount";
+                  setType(v);
+                  if (v !== "budget_cap") setScope("overall");
+                }}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
               >
                 <option value="budget_cap">Budget Cap</option>
@@ -437,37 +490,39 @@ function CreateGoalDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm font-medium">Scope</label>
-              <select
-                value={scope}
-                onChange={(e) =>
-                  setScope(e.target.value as "overall" | "category")
-                }
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                <option value="overall">Overall</option>
-                <option value="category">Category</option>
-              </select>
-            </div>
-            {scope === "category" && (
+          {type === "budget_cap" && (
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-sm font-medium">Category</label>
+                <label className="text-sm font-medium">Scope</label>
                 <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
+                  value={scope}
+                  onChange={(e) =>
+                    setScope(e.target.value as "overall" | "category")
+                  }
                   className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
                 >
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
+                  <option value="overall">Overall</option>
+                  <option value="category">Category</option>
                 </select>
               </div>
-            )}
-          </div>
+              {scope === "category" && (
+                <div>
+                  <label className="text-sm font-medium">Category</label>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  >
+                    {CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -686,6 +741,12 @@ export default function GoalsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingGoal, setEditingGoal] = useState<GoalData | null>(null);
   const [evaluating, setEvaluating] = useState(false);
+  const [reordering, setReordering] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
+  );
 
   const fetchGoals = useCallback(async () => {
     try {
@@ -789,7 +850,33 @@ export default function GoalsPage() {
     }
   }
 
-  const activeGoals = goalsData.filter((g) => g.isActive);
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const annualActive = goalsData.filter((g) => g.isActive && g.period === "annual");
+    const oldIndex = annualActive.findIndex((g) => g.id === active.id);
+    const newIndex = annualActive.findIndex((g) => g.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(annualActive, oldIndex, newIndex);
+    const rest = goalsData.filter((g) => !(g.isActive && g.period === "annual"));
+    setGoalsData([...reordered, ...rest]);
+
+    try {
+      await fetch("/api/goals/reorder", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderedIds: reordered.map((g) => g.id) }),
+      });
+    } catch {
+      toast.error("Failed to save order");
+      fetchGoals();
+    }
+  }
+
+  const activeGoals = goalsData.filter((g) => g.isActive && g.period === "annual");
+  const monthlyGoals = goalsData.filter((g) => g.isActive && g.period === "monthly");
   const inactiveGoals = goalsData.filter((g) => !g.isActive);
   const totalBadges = goalsData.reduce(
     (sum, g) => sum + g.history.filter((h) => h.achieved).length,
@@ -839,7 +926,7 @@ export default function GoalsPage() {
         <div className="flex gap-2">
           <button
             onClick={handleEvaluate}
-            disabled={evaluating || activeGoals.length === 0}
+            disabled={evaluating || (activeGoals.length === 0 && monthlyGoals.length === 0)}
             className="px-3 py-1.5 text-sm rounded-md border hover:bg-accent disabled:opacity-50"
           >
             {evaluating ? "Evaluating..." : "Evaluate Past Months"}
@@ -890,7 +977,7 @@ export default function GoalsPage() {
       </div>
 
       {/* Active Goals Grid */}
-      {activeGoals.length === 0 && inactiveGoals.length === 0 ? (
+      {activeGoals.length === 0 && monthlyGoals.length === 0 && inactiveGoals.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <p className="text-lg">No goals yet</p>
           <p className="text-sm mt-1">
@@ -901,18 +988,108 @@ export default function GoalsPage() {
         <>
           {activeGoals.length > 0 && (
             <div>
-              <h2 className="text-lg font-semibold mb-3">Active Goals</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {activeGoals.map((goal) => (
-                  <GoalCard
-                    key={goal.id}
-                    goal={goal}
-                    onDelete={handleDelete}
-                    onToggle={handleToggle}
-                    onEdit={setEditingGoal}
-                  />
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold">Active Goals</h2>
+                {activeGoals.length > 1 && (
+                  <button
+                    onClick={() => setReordering((r) => !r)}
+                    className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                      reordering
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "text-muted-foreground hover:text-foreground border-border"
+                    }`}
+                  >
+                    {reordering ? "Done" : "Reorder"}
+                  </button>
+                )}
+              </div>
+              {reordering ? (
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext
+                    items={activeGoals.map((g) => g.id)}
+                    strategy={rectSortingStrategy}
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {activeGoals.map((goal) => (
+                        <SortableGoalCard
+                          key={goal.id}
+                          goal={goal}
+                          onDelete={handleDelete}
+                          onToggle={handleToggle}
+                          onEdit={setEditingGoal}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {activeGoals.map((goal) => (
+                    <GoalCard
+                      key={goal.id}
+                      goal={goal}
+                      onDelete={handleDelete}
+                      onToggle={handleToggle}
+                      onEdit={setEditingGoal}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {monthlyGoals.length > 0 && (
+            <div>
+              <h2 className="text-lg font-semibold mb-3">Monthly Goals</h2>
+              <div className="rounded-lg border divide-y">
+                {monthlyGoals.map((goal) => (
+                  <div key={goal.id} className="flex items-center justify-between px-4 py-3">
+                    <div className="min-w-0">
+                      <span className="font-medium">{goal.name}</span>
+                      <span className="text-xs text-muted-foreground ml-2">
+                        {goal.type === "budget_cap" ? "Budget Cap" : goal.type === "savings_amount" ? "Savings Goal" : "Savings %"}
+                        {goal.owner && ` / ${goal.owner}`}
+                        {goal.category && ` / ${goal.category}`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {goal.streak > 0 && (
+                        <span className="text-xs bg-orange-500/10 text-orange-500 px-1.5 py-0.5 rounded-full font-medium">
+                          {goal.streak} streak
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground">
+                        Target: {goal.type === "savings_target" ? `${goal.targetAmount}%` : `${goal.currency === "ILS" ? "₪" : "$"}${goal.targetAmount.toLocaleString()}`}
+                      </span>
+                      <button
+                        onClick={() => setEditingGoal(goal)}
+                        className="text-xs text-muted-foreground hover:text-foreground p-1"
+                      >
+                        edit
+                      </button>
+                      <button
+                        onClick={() => handleToggle(goal.id, false)}
+                        className="text-xs text-muted-foreground hover:text-foreground p-1"
+                      >
+                        OFF
+                      </button>
+                      <button
+                        onClick={() => handleDelete(goal.id)}
+                        className="text-xs text-muted-foreground hover:text-red-500 p-1"
+                      >
+                        x
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Monthly goals are tracked in the Achievement History table below.
+              </p>
             </div>
           )}
 
@@ -944,39 +1121,54 @@ export default function GoalsPage() {
               <thead>
                 <tr className="border-b bg-muted/30">
                   <th className="text-left p-3 font-medium">Goal</th>
-                  {goalsData[0]?.history
-                    ?.slice()
-                    .reverse()
-                    .map((h) => (
-                      <th
-                        key={h.period}
-                        className="text-center p-3 font-medium"
-                      >
-                        {h.period}
+                  {(() => {
+                    const allPeriods = new Set<string>();
+                    for (const g of goalsData) {
+                      for (const h of g.history) allPeriods.add(h.period);
+                    }
+                    return [...allPeriods].sort().map((p) => (
+                      <th key={p} className="text-center p-3 font-medium">
+                        {formatPeriod(p)}
                       </th>
-                    ))}
+                    ));
+                  })()}
                 </tr>
               </thead>
               <tbody>
-                {goalsData
-                  .filter((g) => g.history.length > 0)
-                  .map((g) => (
-                    <tr key={g.id} className="border-b last:border-0">
-                      <td className="p-3 font-medium">{g.name}</td>
-                      {[...g.history].reverse().map((h) => (
-                        <td key={h.period} className="text-center p-3">
-                          <span
-                            title={`${h.actualAmount}`}
-                            className={
-                              h.achieved ? "text-green-500" : "text-red-400"
-                            }
-                          >
-                            {h.achieved ? "\u2713" : "\u2717"}
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
+                {(() => {
+                  const allPeriods = new Set<string>();
+                  for (const g of goalsData) {
+                    for (const h of g.history) allPeriods.add(h.period);
+                  }
+                  const sortedPeriods = [...allPeriods].sort();
+                  return goalsData
+                    .filter((g) => g.history.length > 0)
+                    .map((g) => {
+                      const byPeriod = new Map(g.history.map((h) => [h.period, h]));
+                      return (
+                        <tr key={g.id} className="border-b last:border-0">
+                          <td className="p-3 font-medium">{g.name}</td>
+                          {sortedPeriods.map((p) => {
+                            const h = byPeriod.get(p);
+                            return (
+                              <td key={p} className="text-center p-3">
+                                {h ? (
+                                  <span
+                                    title={`${h.actualAmount}`}
+                                    className={h.achieved ? "text-green-500" : "text-red-400"}
+                                  >
+                                    {h.achieved ? "\u2713" : "\u2717"}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">\u2014</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                      </tr>
+                      );
+                    });
+                })()}
               </tbody>
             </table>
           </div>

@@ -8,6 +8,8 @@ Annual financial review app for a dual-country (US/Israel) household with ~14 ac
 - **shadcn/ui** + **Tailwind CSS v4** + **Recharts** for UI/charts
 - **Drizzle ORM** + **Neon Postgres** (serverless)
 - **SheetJS** (xlsx) + custom CSV parsers for file parsing
+- **@dnd-kit** (core + sortable + utilities) for drag-and-drop goal reordering
+- **canvas-confetti** for celebration animations
 - **frankfurter.dev** API for daily ILS↔USD exchange rates (cached in DB)
 
 ## Project Structure
@@ -24,6 +26,7 @@ src/
 │   ├── net-worth/page.tsx          # Prompted balance entry + net worth tracking
 │   ├── excluded/page.tsx           # View and manage excluded transactions
 │   ├── chat/page.tsx               # AI chatbot — ask natural language questions about finances
+│   ├── goals/page.tsx              # Goals — budget caps, savings targets, streaks, gamification
 │   └── api/
 │       ├── dashboard/route.ts      # Analytics: totals, breakdowns, trends, events, top txns
 │       ├── transactions/route.ts   # GET (filtered), POST (bulk import w/ dedup + logging), DELETE
@@ -37,6 +40,9 @@ src/
 │       ├── categorize/route.ts     # AI categorization + normalization + recurring detection
 │       ├── chat/route.ts           # AI chatbot SSE endpoint (tool-calling loop)
 │       ├── chat/tools.ts           # 8 query tools for chatbot (transactions, categories, trends, etc.)
+│       ├── goals/route.ts          # CRUD + progress computation for goals
+│       ├── goals/evaluate/route.ts # Evaluate goals for past periods, record achievements
+│       ├── goals/reorder/route.ts  # PATCH: persist drag-and-drop goal ordering
 │       └── import-history/route.ts # GET: recent import logs with account names
 ├── components/
 │   ├── sidebar.tsx                 # Nav sidebar with SVG icons, collapsible, sync rates button
@@ -88,7 +94,7 @@ src/
 - Dedicated `/excluded` page to review and un-exclude
 
 ### Categorization
-- 13 standard categories: Food & Groceries, Restaurants & Cafes, Transportation, Housing & Utilities, Health & Medical, Shopping & Clothing, Entertainment & Leisure, Subscriptions, Insurance, Education, Transfers, Government & Taxes, Other
+- 9 standard categories: Food & Dining, Transportation, Housing & Utilities, Health & Insurance, Shopping & Clothing, Entertainment & Leisure, Transfers, Government & Taxes, Other
 - AI categorization via NVIDIA-hosted Claude API (OpenAI-compatible endpoint)
 - Category mappings cached in `merchant_categories` table (auto-applied on future imports)
 - User overrides (`isUserOverride = 1`) take precedence over AI
@@ -135,7 +141,7 @@ src/
 
 ## Database
 
-10 tables defined in `src/db/schema.ts`:
+12 tables defined in `src/db/schema.ts`:
 - `accounts` — financial accounts with institution, currency, owner
 - `transactions` — imported transactions with category, event, excluded, isRecurring flags
 - `exchange_rates` — cached daily currency rates (unique on date+pair)
@@ -146,6 +152,8 @@ src/
 - `merchant_categories` — merchant→category mappings (AI + user overrides)
 - `import_logs` — audit log of file imports (account, filename, parser, row counts, timestamp)
 - `categories` — category definitions (unused, reserved for future)
+- `goals` — financial goals (budget_cap, savings_target, savings_amount) with scope, owner, period
+- `goal_achievements` — per-period achievement records for streak/history tracking (unique on goalId+period)
 
 DB connection is lazy-initialized via Proxy in `src/db/index.ts` to avoid build-time errors.
 
@@ -159,8 +167,8 @@ npx drizzle-kit push # Push schema changes to Neon DB
 
 ### AI Chatbot
 - `/chat` page with conversational UI — users ask natural language questions about their finances
-- Uses **tool-calling pattern**: LLM gets 8 pre-built query tools, API route executes them server-side, loops up to 5 rounds
-- Tools: `query_transactions` (with aggregation modes), `get_spending_by_category`, `get_monthly_trend`, `get_accounts`, `get_income_entries`, `get_events`, `get_top_merchants`, `get_net_worth_history`
+- Uses **tool-calling pattern**: LLM gets 11 pre-built query tools, API route executes them server-side, loops up to 5 rounds
+- Tools: `query_transactions` (with aggregation modes), `get_spending_by_category`, `get_monthly_trend`, `get_accounts`, `get_income_entries`, `get_events`, `get_top_merchants`, `get_net_worth_history`, `get_financial_summary`, `get_goals`, `get_goal_achievements`
 - **SSE streaming**: `POST /api/chat` returns `text/event-stream` with event types: `status` (tool execution), `delta` (text tokens), `done`, `error`
 - Tools handle ILS→USD conversion internally via `getExchangeRatesForDates()`
 - Row results capped at 20-50 per tool call to prevent token overflow
@@ -190,6 +198,19 @@ NVIDIA_MODEL=aws/anthropic/bedrock-claude-opus-4-6
 - Each import logs: account, filename(s), parser, total/imported/duplicate row counts
 - CSV export available on transactions page — exports current filtered view
 - Transactions page reads URL query params on mount (`category`, `startDate`, `endDate`) to support drill-down from dashboard
+
+### Goals & Gamification
+- Three goal types: `budget_cap` (spend under $X), `savings_target` (save X% of income), `savings_amount` (save $X)
+- Scope: overall or category-specific (e.g. budget cap on "Restaurants & Cafes"), optional owner filter
+- Period: monthly or annual
+- Progress computed live from transactions (same queries as dashboard), not stored — only achievements are persisted
+- Achievements stored in `goal_achievements` table for streak persistence (unique on goalId+period)
+- "Evaluate" button processes last 6 months, recording pass/fail for each period
+- Celebrations: canvas-confetti on achievements + streak milestones (3, 6, 12 months)
+- Gamification: streak counters, report card grade (A/B/C/D based on achievement ratio), owner leaderboard
+- Status thresholds: `achieved` (>=100% of target), `on_track` (>=95%), `at_risk` (>=70%), `exceeded`/`missed` (<70%)
+- Drag-and-drop reordering of active goals via @dnd-kit (sortOrder column, PATCH `/api/goals/reorder`)
+- Currency display: ILS goals show ₪, USD goals show $
 
 ## Important Notes
 
