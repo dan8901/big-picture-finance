@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -16,6 +16,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
@@ -38,6 +45,9 @@ export default function ExcludedPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [sortBy, setSortBy] = useState<"date" | "amount">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [filterAccountId, setFilterAccountId] = useState<string>("all");
 
   const fetchData = useCallback(async () => {
     const [txRes, acctRes] = await Promise.all([
@@ -80,10 +90,10 @@ export default function ExcludedPage() {
   }
 
   function toggleSelectAll() {
-    if (selected.size === transactions.length) {
+    if (selected.size === filteredAndSorted.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(transactions.map((tx) => tx.id)));
+      setSelected(new Set(filteredAndSorted.map((tx) => tx.id)));
     }
   }
 
@@ -96,6 +106,32 @@ export default function ExcludedPage() {
     toast.success(`Included ${selected.size} transactions`);
     setSelected(new Set());
     fetchData();
+  }
+
+  const filteredAndSorted = useMemo(() => {
+    let filtered = transactions;
+    if (filterAccountId !== "all") {
+      filtered = filtered.filter((tx) => tx.accountId === parseInt(filterAccountId));
+    }
+    return [...filtered].sort((a, b) => {
+      if (sortBy === "date") {
+        return sortDir === "asc"
+          ? a.date.localeCompare(b.date)
+          : b.date.localeCompare(a.date);
+      }
+      const aAmt = Math.abs(parseFloat(a.amount));
+      const bAmt = Math.abs(parseFloat(b.amount));
+      return sortDir === "asc" ? aAmt - bAmt : bAmt - aAmt;
+    });
+  }, [transactions, filterAccountId, sortBy, sortDir]);
+
+  function toggleSort(col: "date" | "amount") {
+    if (sortBy === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(col);
+      setSortDir("desc");
+    }
   }
 
   // Group by description + account for summary view
@@ -216,11 +252,24 @@ export default function ExcludedPage() {
 
       {/* Full list */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>All Excluded Transactions</CardTitle>
+          <Select value={filterAccountId} onValueChange={setFilterAccountId}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="All accounts" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All accounts</SelectItem>
+              {accounts.map((a) => (
+                <SelectItem key={a.id} value={String(a.id)}>
+                  {a.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </CardHeader>
         <CardContent>
-          {transactions.length === 0 ? (
+          {filteredAndSorted.length === 0 ? (
             <div className="flex h-[200px] items-center justify-center text-muted-foreground">
               No excluded transactions.
             </div>
@@ -234,22 +283,30 @@ export default function ExcludedPage() {
                       <input
                         type="checkbox"
                         checked={
-                          transactions.length > 0 &&
-                          selected.size === transactions.length
+                          filteredAndSorted.length > 0 &&
+                          selected.size === filteredAndSorted.length
                         }
                         onChange={toggleSelectAll}
                         className="rounded"
                       />
                     </TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead>
+                      <button className="flex items-center gap-1 font-medium hover:text-foreground" onClick={() => toggleSort("date")}>
+                        Date {sortBy === "date" ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                      </button>
+                    </TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Category</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="text-right">
+                      <button className="ml-auto flex items-center gap-1 font-medium hover:text-foreground" onClick={() => toggleSort("amount")}>
+                        Amount {sortBy === "amount" ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                      </button>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {transactions.map((tx) => (
+                  {filteredAndSorted.map((tx) => (
                     <TableRow
                       key={tx.id}
                       className={selected.has(tx.id) ? "bg-accent/50" : ""}
