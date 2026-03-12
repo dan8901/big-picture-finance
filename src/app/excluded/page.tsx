@@ -41,12 +41,12 @@ export default function ExcludedPage() {
 
   const fetchData = useCallback(async () => {
     const [txRes, acctRes] = await Promise.all([
-      fetch("/api/transactions"),
+      fetch("/api/transactions?limit=10000"),
       fetch("/api/accounts"),
     ]);
-    const allTx = await txRes.json();
+    const data = await txRes.json();
     setTransactions(
-      allTx.filter((tx: { excluded: number }) => tx.excluded === 1)
+      (data.transactions || []).filter((tx: { excluded: number }) => tx.excluded === 1)
     );
     setAccounts(await acctRes.json());
   }, []);
@@ -143,7 +143,7 @@ export default function ExcludedPage() {
             <CardTitle>Excluded by Description</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
+            <div className="max-h-[600px] overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
