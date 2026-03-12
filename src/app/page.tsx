@@ -142,6 +142,7 @@ export default function DashboardPage() {
   const [prevData, setPrevData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [hiddenLines, setHiddenLines] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -819,7 +820,22 @@ export default function DashboardPage() {
                         return label;
                       }}
                     />
-                    <Legend />
+                    <Legend
+                      onClick={(e) => {
+                        const key = e.dataKey as string;
+                        setHiddenLines((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
+                          return next;
+                        });
+                      }}
+                      formatter={(value, entry) => (
+                        <span style={{ color: hiddenLines.has(entry.dataKey as string) ? "#ccc" : entry.color, cursor: "pointer" }}>
+                          {value}
+                        </span>
+                      )}
+                    />
                     <Line
                       yAxisId="usd"
                       type="monotone"
@@ -827,6 +843,7 @@ export default function DashboardPage() {
                       stroke="#16a34a"
                       strokeWidth={2}
                       name="Income"
+                      hide={hiddenLines.has("income")}
                     />
                     <Line
                       yAxisId="usd"
@@ -835,6 +852,7 @@ export default function DashboardPage() {
                       stroke="#dc2626"
                       strokeWidth={2}
                       name="Expenses"
+                      hide={hiddenLines.has("expenses")}
                     />
                     <Line
                       yAxisId="usd"
@@ -844,6 +862,7 @@ export default function DashboardPage() {
                       strokeWidth={1.5}
                       strokeDasharray="4 4"
                       name="Recurring"
+                      hide={hiddenLines.has("recurring")}
                     />
                     <Line
                       yAxisId="usd"
@@ -853,6 +872,7 @@ export default function DashboardPage() {
                       strokeWidth={1.5}
                       strokeDasharray="4 4"
                       name="Non-recurring"
+                      hide={hiddenLines.has("nonRecurring")}
                     />
                     <Line
                       yAxisId="usd"
@@ -861,6 +881,7 @@ export default function DashboardPage() {
                       stroke="#9333ea"
                       strokeWidth={2}
                       name="Savings"
+                      hide={hiddenLines.has("savings")}
                     />
                     <Line
                       yAxisId="ils"
@@ -870,6 +891,7 @@ export default function DashboardPage() {
                       strokeWidth={2}
                       strokeDasharray="5 5"
                       name="Income (ILS)"
+                      hide={hiddenLines.has("incomeILS")}
                     />
                     <Line
                       yAxisId="ils"
@@ -879,6 +901,7 @@ export default function DashboardPage() {
                       strokeWidth={2}
                       strokeDasharray="5 5"
                       name="Expenses (ILS)"
+                      hide={hiddenLines.has("expensesILS")}
                     />
                   </LineChart>
                 </ResponsiveContainer>
