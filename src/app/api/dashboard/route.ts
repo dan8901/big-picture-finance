@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, manualIncomeEntries, accounts } from "@/db/schema";
+import { transactions, manualIncomeEntries, accounts, events } from "@/db/schema";
 import { sql, and, eq } from "drizzle-orm";
 import { getExchangeRatesForDates } from "@/lib/exchange";
 
@@ -38,6 +38,9 @@ export async function GET(request: NextRequest) {
   // Get accounts for owner info
   const accts = await db.select().from(accounts);
   const accountMap = Object.fromEntries(accts.map((a) => [a.id, a]));
+
+  const evts = await db.select().from(events);
+  const eventMap = Object.fromEntries(evts.map((e) => [e.id, e]));
 
   // Fetch exchange rates for all ILS transaction dates
   const ilsDates = txns
@@ -146,6 +149,7 @@ export async function GET(request: NextRequest) {
   const expensesByOwner: Record<string, number> = {};
   const eventExpenses: Record<string, number> = {};
   const eventExpensesILS: Record<string, number> = {};
+  const eventTxCounts: Record<string, number> = {};
   let normalExpenses = 0;
   let normalExpensesILS = 0;
   let recurringExpenses = 0;
@@ -220,6 +224,7 @@ export async function GET(request: NextRequest) {
       if (tx.eventId) {
         eventExpenses[String(tx.eventId)] =
           (eventExpenses[String(tx.eventId)] ?? 0) + absAmount;
+        eventTxCounts[String(tx.eventId)] = (eventTxCounts[String(tx.eventId)] ?? 0) + 1;
         if (isILS) {
           eventExpensesILS[String(tx.eventId)] =
             (eventExpensesILS[String(tx.eventId)] ?? 0) + absRaw;
@@ -292,6 +297,44 @@ export async function GET(request: NextRequest) {
     .sort((a, b) => b.usd - a.usd)
     .slice(0, 20);
 
+  // Top 10 largest individual non-recurring expense transactions
+  const topExpenseTransactions = txns
+    .filter((tx) => parseFloat(tx.amount) < 0 && !tx.isRecurring && !tx.eventId)
+    .map((tx) => {
+      const rawAmount = parseFloat(tx.amount);
+      let usdAmount = Math.abs(rawAmount);
+      if (tx.currency === "ILS") {
+        const rate = ilsRates.get(tx.date) ?? 1;
+        usdAmount = Math.abs(rawAmount * rate);
+      }
+      return {
+        date: tx.date,
+        description: tx.description,
+        amount: rawAmount,
+        currency: tx.currency,
+        usdAmount,
+        category: tx.category ?? "Uncategorized",
+        accountId: tx.accountId,
+        owner: accountMap[tx.accountId]?.owner ?? "Unknown",
+      };
+    })
+    .sort((a, b) => b.usdAmount - a.usdAmount)
+    .slice(0, 10);
+
+  const eventDetails = Object.entries(eventExpenses).map(([id, usd]) => {
+    const evt = eventMap[parseInt(id)];
+    return {
+      id: parseInt(id),
+      name: evt?.name ?? `Event #${id}`,
+      type: evt?.type ?? "other",
+      startDate: evt?.startDate ?? "",
+      endDate: evt?.endDate ?? null,
+      totalUsd: usd,
+      totalIls: eventExpensesILS[id] ?? 0,
+      txCount: eventTxCounts[id] ?? 0,
+    };
+  }).sort((a, b) => b.totalUsd - a.totalUsd);
+
   const monthlyTrend = Object.entries(monthlyData)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, data]) => ({
@@ -334,5 +377,7 @@ export async function GET(request: NextRequest) {
     nonRecurringByCategory,
     recurringMerchants,
     nonRecurringTopMerchants,
+    eventDetails,
+    topExpenseTransactions,
   });
 }

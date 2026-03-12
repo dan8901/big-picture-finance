@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
         eq(exchangeRates.toCurrency, "USD")
       )
     )
-    .orderBy(exchangeRates.date)
+    .orderBy(desc(exchangeRates.date))
     .limit(1);
 
   let lastKnownRate: number | null =

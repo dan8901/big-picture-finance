@@ -17,15 +17,15 @@ src/
 ├── app/
 │   ├── page.tsx                    # Dashboard — income/expense/savings summary + charts
 │   ├── layout.tsx                  # Root layout with sidebar nav
-│   ├── upload/page.tsx             # File upload → parse → preview → import
-│   ├── transactions/page.tsx       # Browse, filter, categorize, exclude transactions
+│   ├── upload/page.tsx             # File upload → parse → preview → import + history
+│   ├── transactions/page.tsx       # Browse, filter, categorize, exclude, export transactions
 │   ├── accounts/page.tsx           # Account CRUD
 │   ├── income/page.tsx             # Manual income entries (salary, RSU, ESPP, pension)
 │   ├── net-worth/page.tsx          # Prompted balance entry + net worth tracking
 │   ├── excluded/page.tsx           # View and manage excluded transactions
 │   └── api/
-│       ├── dashboard/route.ts      # Analytics: totals, breakdowns, trends
-│       ├── transactions/route.ts   # GET (filtered), POST (bulk import w/ dedup), DELETE
+│       ├── dashboard/route.ts      # Analytics: totals, breakdowns, trends, events, top txns
+│       ├── transactions/route.ts   # GET (filtered), POST (bulk import w/ dedup + logging), DELETE
 │       ├── transactions/bulk/route.ts # PATCH: bulk category/event/exclude updates
 │       ├── upload/route.ts         # Parse files via parser registry
 │       ├── accounts/route.ts       # CRUD
@@ -33,7 +33,8 @@ src/
 │       ├── net-worth/route.ts      # CRUD with account joins
 │       ├── events/route.ts         # CRUD for trip/event tagging
 │       ├── exchange-rates/route.ts # GET (needed dates) + POST (fetch & cache rates)
-│       └── categorize/route.ts     # AI categorization + normalization + recurring detection
+│       ├── categorize/route.ts     # AI categorization + normalization + recurring detection
+│       └── import-history/route.ts # GET: recent import logs with account names
 ├── components/
 │   ├── sidebar.tsx                 # Nav sidebar with SVG icons, collapsible, sync rates button
 │   └── ui/                         # shadcn/ui components (don't edit directly)
@@ -46,6 +47,7 @@ src/
     └── parsers/
         ├── types.ts                # ParsedTransaction, Parser interfaces
         ├── index.ts                # Parser registry (getParser, listParsers)
+        ├── csv-utils.ts            # Shared parseCSVLine() for CSV parsers
         ├── cal.ts                  # ✅ Cal credit card (XLSX, Hebrew)
         ├── isracard.ts             # ✅ Isracard credit card (XLSX, Hebrew)
         ├── bank-hapoalim.ts        # ✅ Bank Hapoalim (CSV, Hebrew)
@@ -96,6 +98,7 @@ src/
 - `parse()` returns `ParsedTransaction[]` with: date, amount, currency, description, category?, excluded?
 - Registry in `index.ts` maps institution string → parser
 - To add a new parser: create the file, add to registry imports and `parsers` object
+- CSV parsers must use `parseCSVLine()` from `csv-utils.ts` (not inline copies)
 - Date formatting: use `getFullYear()/getMonth()/getDate()` (NOT `toISOString()`) to avoid timezone off-by-one
 - Pepper parser uses `pdftotext -layout` (requires poppler: `brew install poppler`)
 
@@ -129,7 +132,7 @@ src/
 
 ## Database
 
-9 tables defined in `src/db/schema.ts`:
+10 tables defined in `src/db/schema.ts`:
 - `accounts` — financial accounts with institution, currency, owner
 - `transactions` — imported transactions with category, event, excluded, isRecurring flags
 - `exchange_rates` — cached daily currency rates (unique on date+pair)
@@ -138,6 +141,7 @@ src/
 - `events` — trips/one-time expenses for transaction grouping
 - `exclusion_rules` — account+description pairs to auto-exclude on import
 - `merchant_categories` — merchant→category mappings (AI + user overrides)
+- `import_logs` — audit log of file imports (account, filename, parser, row counts, timestamp)
 - `categories` — category definitions (unused, reserved for future)
 
 DB connection is lazy-initialized via Proxy in `src/db/index.ts` to avoid build-time errors.
@@ -159,13 +163,29 @@ NVIDIA_BASE_URL=https://inference-api.nvidia.com/v1
 NVIDIA_MODEL=aws/anthropic/bedrock-claude-opus-4-6
 ```
 
+### Dashboard Features
+- **Drill-down**: clicking pie chart segments or "View txns" links navigates to `/transactions?category=X&startDate=Y&endDate=Z`
+- **YoY comparison**: automatically fetches previous year's data for side-by-side comparison (only shows if prev year has data)
+- **Monthly trend**: includes savings line (income - expenses) alongside income/expenses/recurring/non-recurring
+- **Events table**: dedicated breakdown of trip/event spending with names, dates, totals
+- **Top one-time expenses**: 10 largest non-recurring transactions for spotting anomalies
+- **Loading skeleton**: summary cards show animated skeleton placeholders while fetching
+
+### Import System
+- Upload page shows import history at the bottom (from `import_logs` table)
+- Each import logs: account, filename(s), parser, total/imported/duplicate row counts
+- CSV export available on transactions page — exports current filtered view
+- Transactions page reads URL query params on mount (`category`, `startDate`, `endDate`) to support drill-down from dashboard
+
 ## Important Notes
 
 - No auth — single household app
 - shadcn/ui components in `src/components/ui/` are generated — don't edit them
 - The `drizzle.config.ts` loads `.env.local` explicitly via dotenv (not auto-loaded)
-- All pages are client components (`"use client"`) except the dashboard home page
+- All pages are client components (`"use client"`) — dashboard home page included
+- `useSearchParams()` requires a `<Suspense>` boundary (see transactions page pattern)
 - Recharts tooltip `formatter` must use `(value) => format(Number(value))` to avoid type errors
 - Pepper parser requires `pdftotext` system binary (poppler) — not available on Vercel serverless
 - Net worth recording skips credit card accounts (assumed paid in full monthly)
 - Dashboard YTD default end date is last day of previous month
+- After adding/changing DB tables, run `npx drizzle-kit push` to sync schema to Neon

@@ -114,10 +114,13 @@ export async function POST(request: NextRequest) {
 }
 
 async function getUncategorizedDescriptions() {
-  // Load cached merchant→category mappings
+  // Load cached merchant→category mappings (single query, reused below)
   const cached = await db.select().from(merchantCategories);
-  const cachedMap = new Set(
+  const cachedSet = new Set(
     cached.map((r) => r.merchantName.toLowerCase().trim())
+  );
+  const cacheMap = new Map(
+    cached.map((r) => [r.merchantName.toLowerCase().trim(), r.category])
   );
 
   // Find uncategorized, non-excluded transactions
@@ -131,13 +134,7 @@ async function getUncategorizedDescriptions() {
   // Get unique descriptions not in cache
   const unique = [
     ...new Set(uncategorized.map((t) => t.description.toLowerCase().trim())),
-  ].filter((d) => !cachedMap.has(d));
-
-  // Apply cached ones first
-  const cachedEntries = await db.select().from(merchantCategories);
-  const cacheMap = new Map(
-    cachedEntries.map((r) => [r.merchantName.toLowerCase().trim(), r.category])
-  );
+  ].filter((d) => !cachedSet.has(d));
 
   let cachedApplied = 0;
   for (const tx of uncategorized) {
@@ -249,7 +246,7 @@ async function normalizeCategories() {
     const result = await db
       .update(transactions)
       .set({ category: to })
-      .where(eq(transactions.category, from));
+      .where(sql`lower(${transactions.category}) = lower(${from})`);
     updated += result.rowCount ?? 0;
   }
 

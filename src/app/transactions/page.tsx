@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -81,6 +82,14 @@ const STANDARD_CATEGORIES = [
 ];
 
 export default function TransactionsPage() {
+  return (
+    <Suspense>
+      <TransactionsContent />
+    </Suspense>
+  );
+}
+
+function TransactionsContent() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
@@ -107,6 +116,17 @@ export default function TransactionsPage() {
     startDate: "",
     endDate: "",
   });
+
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const cat = searchParams.get("category");
+    const start = searchParams.get("startDate");
+    const end = searchParams.get("endDate");
+    if (cat) setCategoryFilter(new Set([cat]));
+    if (start) setStartDate(start);
+    if (end) setEndDate(end);
+  }, []);
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true);

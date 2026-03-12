@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, Fragment } from "react";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -72,6 +73,25 @@ interface DashboardData {
   nonRecurringByCategory: Record<string, number>;
   recurringMerchants: MerchantData[];
   nonRecurringTopMerchants: MerchantData[];
+  eventDetails: Array<{
+    id: number;
+    name: string;
+    type: string;
+    startDate: string;
+    endDate: string | null;
+    totalUsd: number;
+    totalIls: number;
+    txCount: number;
+  }>;
+  topExpenseTransactions: Array<{
+    date: string;
+    description: string;
+    amount: number;
+    currency: string;
+    usdAmount: number;
+    category: string;
+    owner: string;
+  }>;
 }
 
 interface MerchantData {
@@ -109,6 +129,7 @@ function formatAmount(amount: number) {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const currentYear = new Date().getFullYear();
   const lastDayPrevMonth = (() => {
     const d = new Date();
@@ -155,6 +176,11 @@ export default function DashboardPage() {
       1
   );
   const monthCount = dayCount / 30.44;
+
+  function drillDown(category: string) {
+    const params = new URLSearchParams({ category, startDate, endDate });
+    router.push(`/transactions?${params}`);
+  }
 
   const categoryData = data
     ? Object.entries(data.expensesByCategory)
@@ -468,6 +494,8 @@ export default function DashboardPage() {
                       label={({ name, percent }) =>
                         `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`
                       }
+                      className="cursor-pointer"
+                      onClick={(_: unknown, index: number) => drillDown(categoryData[index].name)}
                     >
                       {categoryData.map((_, index) => (
                         <Cell
@@ -533,6 +561,12 @@ export default function DashboardPage() {
                               <span className="ml-2 text-xs text-muted-foreground font-normal">
                                 ({data.merchantCountByCategory[cat.name] ?? 0} merchants)
                               </span>
+                              <button
+                                className="ml-2 text-xs text-blue-600 hover:underline font-normal"
+                                onClick={(e) => { e.stopPropagation(); drillDown(cat.name); }}
+                              >
+                                View txns
+                              </button>
                             </TableCell>
                             <TableCell className="text-right">
                               {formatAmount(cat.value)}
@@ -758,7 +792,7 @@ export default function DashboardPage() {
             <CardContent className="h-[280px] md:h-[350px]">
               {data && data.monthlyTrend.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={data.monthlyTrend}>
+                  <LineChart data={data.monthlyTrend.map((m) => ({ ...m, savings: m.income - m.expenses }))}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
                     <YAxis yAxisId="usd" />
@@ -819,6 +853,14 @@ export default function DashboardPage() {
                       strokeWidth={1.5}
                       strokeDasharray="4 4"
                       name="Non-recurring"
+                    />
+                    <Line
+                      yAxisId="usd"
+                      type="monotone"
+                      dataKey="savings"
+                      stroke="#9333ea"
+                      strokeWidth={2}
+                      name="Savings"
                     />
                     <Line
                       yAxisId="ils"
@@ -907,6 +949,113 @@ export default function DashboardPage() {
                         );
                       });
                     })()}
+                  </TableBody>
+                </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Events/Trips Breakdown */}
+          {data && data.eventDetails && data.eventDetails.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Events & Trips Spending</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Event</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Dates</TableHead>
+                      <TableHead className="text-right">Total (USD)</TableHead>
+                      <TableHead className="text-right">Total (ILS)</TableHead>
+                      <TableHead className="text-right"># Txns</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.eventDetails.map((evt) => {
+                      const ilsTotal = evt.totalIls > 0
+                        ? evt.totalIls
+                        : data.weightedExchangeRate > 0
+                          ? evt.totalUsd / data.weightedExchangeRate
+                          : 0;
+                      return (
+                        <TableRow key={evt.id}>
+                          <TableCell className="font-medium">{evt.name}</TableCell>
+                          <TableCell className="text-muted-foreground capitalize">{evt.type.replace("_", " ")}</TableCell>
+                          <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                            {evt.startDate}{evt.endDate ? ` — ${evt.endDate}` : ""}
+                          </TableCell>
+                          <TableCell className="text-right">{formatAmount(evt.totalUsd)}</TableCell>
+                          <TableCell className="text-right">{ilsTotal > 0 ? formatILS(ilsTotal) : "--"}</TableCell>
+                          <TableCell className="text-right">{evt.txCount}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    <TableRow className="font-bold border-t-2">
+                      <TableCell>Total</TableCell>
+                      <TableCell></TableCell>
+                      <TableCell></TableCell>
+                      <TableCell className="text-right">
+                        {formatAmount(data.eventDetails.reduce((s, e) => s + e.totalUsd, 0))}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {data.weightedExchangeRate > 0
+                          ? formatILS(data.eventDetails.reduce((s, e) => s + e.totalUsd, 0) / data.weightedExchangeRate)
+                          : "--"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {data.eventDetails.reduce((s, e) => s + e.txCount, 0)}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Top One-Time Expenses */}
+          {data && data.topExpenseTransactions && data.topExpenseTransactions.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Largest One-Time Expenses</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Owner</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.topExpenseTransactions.map((tx, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="whitespace-nowrap">{tx.date}</TableCell>
+                        <TableCell className="max-w-[250px] truncate" title={tx.description}>
+                          {tx.description}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{tx.category}</TableCell>
+                        <TableCell className="text-muted-foreground">{tx.owner}</TableCell>
+                        <TableCell className="text-right whitespace-nowrap text-red-600">
+                          {tx.currency === "ILS" ? "\u20AA" : "$"}
+                          {Math.abs(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          {tx.currency === "ILS" && data.weightedExchangeRate > 0 && (
+                            <span className="text-muted-foreground text-xs ml-1">
+                              ({formatAmount(tx.usdAmount)})
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
                 </div>
