@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, exclusionRules, merchantCategories } from "@/db/schema";
+import { transactions, exclusionRules, merchantCategories, importLogs } from "@/db/schema";
 import { eq, and, sql, desc, asc } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
@@ -133,6 +133,16 @@ export async function POST(request: NextRequest) {
       })
     );
   }
+
+  // Log the import
+  await db.insert(importLogs).values({
+    accountId,
+    filename: body.filename ?? "unknown",
+    parser: body.parser ?? "unknown",
+    totalRows: items.length,
+    importedRows: items.length - skipped,
+    duplicateRows: skipped,
+  });
 
   return NextResponse.json({
     imported: newItems.length,

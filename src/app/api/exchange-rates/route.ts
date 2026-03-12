@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { exchangeRates, transactions } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 
 // GET: return list of dates in past 3 years not yet cached
 export async function GET() {
@@ -41,20 +41,7 @@ export async function GET() {
   const neededDates = allDates.filter((d) => !cachedSet.has(d));
 
   // Get latest rate for convenience
-  const latestRow = await db
-    .select({ rate: exchangeRates.rate })
-    .from(exchangeRates)
-    .where(
-      and(
-        eq(exchangeRates.fromCurrency, "ILS"),
-        eq(exchangeRates.toCurrency, "USD")
-      )
-    )
-    .orderBy(exchangeRates.date)
-    .limit(1);
-
-  // desc order not available easily, so get all and pick last
-  const allRates = await db
+  const latestRows = await db
     .select({ rate: exchangeRates.rate, date: exchangeRates.date })
     .from(exchangeRates)
     .where(
@@ -62,10 +49,10 @@ export async function GET() {
         eq(exchangeRates.fromCurrency, "ILS"),
         eq(exchangeRates.toCurrency, "USD")
       )
-    );
-  const latestRate = allRates.length > 0
-    ? allRates.sort((a, b) => b.date.localeCompare(a.date))[0]
-    : null;
+    )
+    .orderBy(desc(exchangeRates.date))
+    .limit(1);
+  const latestRate = latestRows[0] ?? null;
 
   return NextResponse.json({
     cached: cached.length,

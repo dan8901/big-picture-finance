@@ -1,24 +1,5 @@
 import type { Parser, ParsedTransaction } from "./types";
-
-function parseCSVLine(line: string): string[] {
-  const fields: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if (ch === "," && !inQuotes) {
-      fields.push(current.trim());
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  fields.push(current.trim());
-  return fields;
-}
+import { parseCSVLine } from "./csv-utils";
 
 function parseDollarAmount(str: string): number | null {
   // Handle "$1,000.00" or "-$5.00"

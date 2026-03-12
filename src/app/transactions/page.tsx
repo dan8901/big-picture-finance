@@ -410,6 +410,27 @@ export default function TransactionsPage() {
     }
   }
 
+  function exportCSV() {
+    const headers = ["Date", "Description", "Amount", "Currency", "Category", "Account", "Event"];
+    const rows = sorted.map((tx) => [
+      tx.date,
+      `"${tx.description.replace(/"/g, '""')}"`,
+      tx.amount,
+      tx.currency,
+      tx.category ?? "",
+      accountName(tx.accountId),
+      eventName(tx.eventId) ?? "",
+    ]);
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `transactions-${startDate || "all"}-${endDate || "all"}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="space-y-8">
       <div>
@@ -758,11 +779,14 @@ export default function TransactionsPage() {
 
       {/* Transactions Table */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>
             {sorted.length} Transaction{sorted.length !== 1 ? "s" : ""}
             {sorted.length !== transactions.length && ` (filtered from ${transactions.length})`}
           </CardTitle>
+          <Button variant="outline" size="sm" onClick={exportCSV} disabled={sorted.length === 0}>
+            Export CSV ({sorted.length})
+          </Button>
         </CardHeader>
         <CardContent>
           {loading && transactions.length === 0 ? (

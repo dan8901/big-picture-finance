@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -117,12 +118,29 @@ export default function DashboardPage() {
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
   const [endDate, setEndDate] = useState(lastDayPrevMonth);
   const [data, setData] = useState<DashboardData | null>(null);
+  const [prevData, setPrevData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
+    setLoading(true);
     const params = new URLSearchParams({ startDate, endDate });
     const res = await fetch(`/api/dashboard?${params}`);
     setData(await res.json());
+
+    // Fetch previous year for comparison
+    const prevStart = startDate.replace(/^\d{4}/, String(parseInt(startDate) - 1));
+    const prevEnd = endDate.replace(/^\d{4}/, String(parseInt(endDate) - 1));
+    const prevParams = new URLSearchParams({ startDate: prevStart, endDate: prevEnd });
+    const prevRes = await fetch(`/api/dashboard?${prevParams}`);
+    const prevJson = await prevRes.json();
+    // Only set if there's actual data
+    if (prevJson.totalIncome > 0 || prevJson.totalExpenses > 0) {
+      setPrevData(prevJson);
+    } else {
+      setPrevData(null);
+    }
+    setLoading(false);
   }, [startDate, endDate]);
 
   useEffect(() => {
@@ -236,16 +254,25 @@ export default function DashboardPage() {
             <CardTitle className="text-sm font-medium">Total Income</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl sm:text-2xl font-bold text-green-600">
-              {data ? formatAmount(data.totalIncome) : "--"}
-              {data && data.weightedExchangeRate > 0 && (
-                <span className="text-lg"> / {formatILS(data.totalIncome / data.weightedExchangeRate)}</span>
-              )}
-            </div>
-            {data && data.weightedExchangeRate > 0 && (
-              <p className="text-lg text-green-600">
-                {formatILS(data.totalIncome / data.weightedExchangeRate / monthCount)}/mo
-              </p>
+            {loading ? (
+              <>
+                <Skeleton className="h-8 w-[120px]" />
+                <Skeleton className="h-5 w-[80px] mt-1" />
+              </>
+            ) : (
+              <>
+                <div className="text-xl sm:text-2xl font-bold text-green-600">
+                  {data ? formatAmount(data.totalIncome) : "--"}
+                  {data && data.weightedExchangeRate > 0 && (
+                    <span className="text-lg"> / {formatILS(data.totalIncome / data.weightedExchangeRate)}</span>
+                  )}
+                </div>
+                {data && data.weightedExchangeRate > 0 && (
+                  <p className="text-lg text-green-600">
+                    {formatILS(data.totalIncome / data.weightedExchangeRate / monthCount)}/mo
+                  </p>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
@@ -256,16 +283,25 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl sm:text-2xl font-bold text-red-600">
-              {data ? formatAmount(data.totalExpenses) : "--"}
-              {data && data.weightedExchangeRate > 0 && (
-                <span className="text-lg"> / {formatILS(data.totalExpenses / data.weightedExchangeRate)}</span>
-              )}
-            </div>
-            {data && data.weightedExchangeRate > 0 && (
-              <p className="text-lg text-red-600">
-                {formatILS(data.totalExpenses / data.weightedExchangeRate / monthCount)}/mo
-              </p>
+            {loading ? (
+              <>
+                <Skeleton className="h-8 w-[120px]" />
+                <Skeleton className="h-5 w-[80px] mt-1" />
+              </>
+            ) : (
+              <>
+                <div className="text-xl sm:text-2xl font-bold text-red-600">
+                  {data ? formatAmount(data.totalExpenses) : "--"}
+                  {data && data.weightedExchangeRate > 0 && (
+                    <span className="text-lg"> / {formatILS(data.totalExpenses / data.weightedExchangeRate)}</span>
+                  )}
+                </div>
+                {data && data.weightedExchangeRate > 0 && (
+                  <p className="text-lg text-red-600">
+                    {formatILS(data.totalExpenses / data.weightedExchangeRate / monthCount)}/mo
+                  </p>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
@@ -274,18 +310,27 @@ export default function DashboardPage() {
             <CardTitle className="text-sm font-medium">Total Saved</CardTitle>
           </CardHeader>
           <CardContent>
-            <div
-              className={`text-2xl font-bold ${data && data.totalSaved >= 0 ? "text-green-600" : "text-red-600"}`}
-            >
-              {data ? formatAmount(data.totalSaved) : "--"}
-              {data && data.weightedExchangeRate > 0 && (
-                <span className="text-lg"> / {formatILS(data.totalSaved / data.weightedExchangeRate)}</span>
-              )}
-            </div>
-            {data && data.weightedExchangeRate > 0 && (
-              <p className={`text-lg ${data && data.totalSaved >= 0 ? "text-green-600" : "text-red-600"}`}>
-                {formatILS(data.totalSaved / data.weightedExchangeRate / monthCount)}/mo
-              </p>
+            {loading ? (
+              <>
+                <Skeleton className="h-8 w-[120px]" />
+                <Skeleton className="h-5 w-[80px] mt-1" />
+              </>
+            ) : (
+              <>
+                <div
+                  className={`text-2xl font-bold ${data && data.totalSaved >= 0 ? "text-green-600" : "text-red-600"}`}
+                >
+                  {data ? formatAmount(data.totalSaved) : "--"}
+                  {data && data.weightedExchangeRate > 0 && (
+                    <span className="text-lg"> / {formatILS(data.totalSaved / data.weightedExchangeRate)}</span>
+                  )}
+                </div>
+                {data && data.weightedExchangeRate > 0 && (
+                  <p className={`text-lg ${data && data.totalSaved >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    {formatILS(data.totalSaved / data.weightedExchangeRate / monthCount)}/mo
+                  </p>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
@@ -294,13 +339,22 @@ export default function DashboardPage() {
             <CardTitle className="text-sm font-medium">Savings Rate</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {data ? `${data.savingsRate.toFixed(1)}%` : "--"}
-            </div>
-            {data && data.weightedExchangeRate > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Avg rate: $1 = {(1 / data.weightedExchangeRate).toFixed(2)} ILS
-              </p>
+            {loading ? (
+              <>
+                <Skeleton className="h-8 w-[120px]" />
+                <Skeleton className="h-5 w-[80px] mt-1" />
+              </>
+            ) : (
+              <>
+                <div className="text-2xl font-bold">
+                  {data ? `${data.savingsRate.toFixed(1)}%` : "--"}
+                </div>
+                {data && data.weightedExchangeRate > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Avg rate: $1 = {(1 / data.weightedExchangeRate).toFixed(2)} ILS
+                  </p>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
@@ -793,6 +847,72 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Year-over-Year Comparison */}
+          {data && prevData && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Year-over-Year Comparison</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Category</TableHead>
+                      <TableHead className="text-right">Previous Year</TableHead>
+                      <TableHead className="text-right">Current Year</TableHead>
+                      <TableHead className="text-right">Change</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {/* Summary rows first */}
+                    {[
+                      { label: "Total Income", curr: data.totalIncome, prev: prevData.totalIncome, green: true },
+                      { label: "Total Expenses", curr: data.totalExpenses, prev: prevData.totalExpenses, green: false },
+                      { label: "Total Saved", curr: data.totalSaved, prev: prevData.totalSaved, green: true },
+                    ].map((row) => {
+                      const delta = row.prev > 0 ? ((row.curr - row.prev) / row.prev) * 100 : 0;
+                      const isGood = row.green ? delta > 0 : delta < 0;
+                      return (
+                        <TableRow key={row.label} className="font-bold border-b-2">
+                          <TableCell>{row.label}</TableCell>
+                          <TableCell className="text-right">{formatAmount(row.prev)}</TableCell>
+                          <TableCell className="text-right">{formatAmount(row.curr)}</TableCell>
+                          <TableCell className={`text-right ${isGood ? "text-green-600" : delta !== 0 ? "text-red-600" : ""}`}>
+                            {delta > 0 ? "+" : ""}{delta.toFixed(1)}%
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {/* Category breakdown */}
+                    {(() => {
+                      const allCategories = [...new Set([
+                        ...Object.keys(data.expensesByCategory),
+                        ...Object.keys(prevData.expensesByCategory),
+                      ])].sort((a, b) => (data.expensesByCategory[b] ?? 0) - (data.expensesByCategory[a] ?? 0));
+                      return allCategories.map((cat) => {
+                        const curr = data.expensesByCategory[cat] ?? 0;
+                        const prev = prevData.expensesByCategory[cat] ?? 0;
+                        const delta = prev > 0 ? ((curr - prev) / prev) * 100 : curr > 0 ? 100 : 0;
+                        return (
+                          <TableRow key={cat}>
+                            <TableCell className="pl-6 text-muted-foreground">{cat}</TableCell>
+                            <TableCell className="text-right">{formatAmount(prev)}</TableCell>
+                            <TableCell className="text-right">{formatAmount(curr)}</TableCell>
+                            <TableCell className={`text-right ${delta < 0 ? "text-green-600" : delta > 0 ? "text-red-600" : ""}`}>
+                              {delta > 0 ? "+" : ""}{delta.toFixed(1)}%
+                            </TableCell>
+                          </TableRow>
+                        );
+                      });
+                    })()}
+                  </TableBody>
+                </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Per-person Breakdown */}
           {ownerData.length > 1 && (

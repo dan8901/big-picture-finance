@@ -63,6 +63,7 @@ export default function UploadPage() {
     skipped: number;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importHistory, setImportHistory] = useState<any[]>([]);
 
   const fetchAccounts = useCallback(async () => {
     const res = await fetch("/api/accounts");
@@ -70,9 +71,15 @@ export default function UploadPage() {
     setAccounts(data);
   }, []);
 
+  const fetchHistory = useCallback(async () => {
+    const res = await fetch("/api/import-history");
+    if (res.ok) setImportHistory(await res.json());
+  }, []);
+
   useEffect(() => {
     fetchAccounts();
-  }, [fetchAccounts]);
+    fetchHistory();
+  }, [fetchAccounts, fetchHistory]);
 
   const selectedAccount = accounts.find(
     (a) => a.id === parseInt(selectedAccountId)
@@ -160,6 +167,8 @@ export default function UploadPage() {
         body: JSON.stringify({
           items: preview,
           accountId: selectedAccount.id,
+          filename: files.map((f) => f.name).join(", "),
+          parser: selectedAccount.institution,
         }),
       });
       const data = await res.json();
@@ -171,6 +180,7 @@ export default function UploadPage() {
 
       setImportResult({ imported: data.imported, skipped: data.skipped });
       setStep("done");
+      fetchHistory();
       toast.success(
         `Imported ${data.imported} transactions (${data.skipped} duplicates skipped)`
       );
@@ -341,7 +351,9 @@ export default function UploadPage() {
                       <TableCell>
                         {tx.description}
                         {isDup && (
-                          <span className="ml-2 text-xs text-muted-foreground">(duplicate)</span>
+                          <span className="ml-2 text-xs text-muted-foreground" title="Matched by date + amount + description">
+                            (duplicate — already imported)
+                          </span>
                         )}
                         {!isDup && tx.excluded && (
                           <span className="ml-2 text-xs text-muted-foreground">(excluded)</span>
@@ -398,6 +410,48 @@ export default function UploadPage() {
               )}
             </div>
             <Button onClick={handleReset}>Upload More</Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Import History */}
+      {importHistory.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Import History</CardTitle>
+            <CardDescription>Recent file imports</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-[400px] overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Account</TableHead>
+                    <TableHead>Files</TableHead>
+                    <TableHead className="text-right">Imported</TableHead>
+                    <TableHead className="text-right">Duplicates</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {importHistory.map((log: any) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="whitespace-nowrap">
+                        {new Date(log.createdAt).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>{log.accountName}</TableCell>
+                      <TableCell className="max-w-[200px] truncate" title={log.filename}>
+                        {log.filename}
+                      </TableCell>
+                      <TableCell className="text-right">{log.importedRows}</TableCell>
+                      <TableCell className="text-right">{log.duplicateRows}</TableCell>
+                      <TableCell className="text-right">{log.totalRows}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -250,7 +250,7 @@ async function normalizeCategories() {
       .update(transactions)
       .set({ category: to })
       .where(eq(transactions.category, from));
-    updated++;
+    updated += result.rowCount ?? 0;
   }
 
   return NextResponse.json({ normalized: updated });

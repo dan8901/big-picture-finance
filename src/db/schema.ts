@@ -132,3 +132,16 @@ export const merchantCategories = pgTable(
   },
   (table) => [uniqueIndex("merchant_name_idx").on(table.merchantName)]
 );
+
+export const importLogs = pgTable("import_logs", {
+  id: serial("id").primaryKey(),
+  accountId: integer("account_id")
+    .references(() => accounts.id)
+    .notNull(),
+  filename: text("filename").notNull(),
+  parser: text("parser").notNull(),
+  totalRows: integer("total_rows").notNull(),
+  importedRows: integer("imported_rows").notNull(),
+  duplicateRows: integer("duplicate_rows").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
