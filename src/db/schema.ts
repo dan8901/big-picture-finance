@@ -6,6 +6,7 @@ import {
   numeric,
   date,
   integer,
+  json,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
@@ -131,6 +132,46 @@ export const merchantCategories = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [uniqueIndex("merchant_name_idx").on(table.merchantName)]
+);
+
+export const chatSessions = pgTable("chat_sessions", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  messages: json("messages").notNull().$type<Array<{ role: string; content: string }>>(),
+  summary: text("summary"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const goals = pgTable("goals", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  type: text("type", { enum: ["budget_cap", "savings_target", "savings_amount"] }).notNull(),
+  scope: text("scope", { enum: ["overall", "category"] }).notNull(),
+  category: text("category"),
+  owner: text("owner"),
+  targetAmount: numeric("target_amount", { precision: 12, scale: 2 }).notNull(),
+  currency: text("currency", { enum: ["USD", "ILS"] }).notNull(),
+  period: text("period", { enum: ["monthly", "annual"] }).notNull(),
+  isActive: integer("is_active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const goalAchievements = pgTable(
+  "goal_achievements",
+  {
+    id: serial("id").primaryKey(),
+    goalId: integer("goal_id")
+      .references(() => goals.id, { onDelete: "cascade" })
+      .notNull(),
+    period: text("period").notNull(), // "2025-09" or "2025"
+    achieved: integer("achieved").default(0).notNull(),
+    actualAmount: numeric("actual_amount", { precision: 12, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("goal_achievement_idx").on(table.goalId, table.period),
+  ]
 );
 
 export const importLogs = pgTable("import_logs", {

@@ -23,6 +23,7 @@ src/
 │   ├── income/page.tsx             # Manual income entries (salary, RSU, ESPP, pension)
 │   ├── net-worth/page.tsx          # Prompted balance entry + net worth tracking
 │   ├── excluded/page.tsx           # View and manage excluded transactions
+│   ├── chat/page.tsx               # AI chatbot — ask natural language questions about finances
 │   └── api/
 │       ├── dashboard/route.ts      # Analytics: totals, breakdowns, trends, events, top txns
 │       ├── transactions/route.ts   # GET (filtered), POST (bulk import w/ dedup + logging), DELETE
@@ -34,6 +35,8 @@ src/
 │       ├── events/route.ts         # CRUD for trip/event tagging
 │       ├── exchange-rates/route.ts # GET (needed dates) + POST (fetch & cache rates)
 │       ├── categorize/route.ts     # AI categorization + normalization + recurring detection
+│       ├── chat/route.ts           # AI chatbot SSE endpoint (tool-calling loop)
+│       ├── chat/tools.ts           # 8 query tools for chatbot (transactions, categories, trends, etc.)
 │       └── import-history/route.ts # GET: recent import logs with account names
 ├── components/
 │   ├── sidebar.tsx                 # Nav sidebar with SVG icons, collapsible, sync rates button
@@ -154,11 +157,22 @@ npx next build       # Production build (type-checks everything)
 npx drizzle-kit push # Push schema changes to Neon DB
 ```
 
+### AI Chatbot
+- `/chat` page with conversational UI — users ask natural language questions about their finances
+- Uses **tool-calling pattern**: LLM gets 8 pre-built query tools, API route executes them server-side, loops up to 5 rounds
+- Tools: `query_transactions` (with aggregation modes), `get_spending_by_category`, `get_monthly_trend`, `get_accounts`, `get_income_entries`, `get_events`, `get_top_merchants`, `get_net_worth_history`
+- **SSE streaming**: `POST /api/chat` returns `text/event-stream` with event types: `status` (tool execution), `delta` (text tokens), `done`, `error`
+- Tools handle ILS→USD conversion internally via `getExchangeRatesForDates()`
+- Row results capped at 20-50 per tool call to prevent token overflow
+- Conversation history stored in client React state only (ephemeral, not persisted)
+- Same NVIDIA-hosted LLM endpoint as categorization (env vars: `NVIDIA_API_KEY`, `NVIDIA_BASE_URL`, `NVIDIA_MODEL`)
+- Frontend parses SSE with `response.body.getReader()` — no external SSE library needed
+
 ## Environment Variables (.env.local)
 
 ```
 DATABASE_URL=postgresql://...@...neon.tech/neondb?sslmode=require
-NVIDIA_API_KEY=...          # For AI categorization (NVIDIA-hosted Claude)
+NVIDIA_API_KEY=...          # For AI categorization + chatbot (NVIDIA-hosted Claude)
 NVIDIA_BASE_URL=https://inference-api.nvidia.com/v1
 NVIDIA_MODEL=aws/anthropic/bedrock-claude-opus-4-6
 ```
@@ -179,6 +193,8 @@ NVIDIA_MODEL=aws/anthropic/bedrock-claude-opus-4-6
 
 ## Important Notes
 
+- Drizzle `eq()` on enum columns requires exact type — use `sql` template for dynamic string values (see `chat/tools.ts` income source filter)
+- OpenAI SDK `ChatCompletionMessageToolCall` is a union type — filter with `tc.type === "function"` before accessing `tc.function`
 - No auth — single household app
 - shadcn/ui components in `src/components/ui/` are generated — don't edit them
 - The `drizzle.config.ts` loads `.env.local` explicitly via dotenv (not auto-loaded)

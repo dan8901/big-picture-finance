@@ -162,6 +162,35 @@ export async function GET(request: NextRequest) {
     { income: number; expenses: number; incomeILS: number; expensesILS: number; usdFromILS: number; recurring: number; nonRecurring: number }
   > = {};
 
+  // Seed monthlyData with manual income (salary, RSU, ESPP, pension, keren_hishtalmut)
+  for (const entries of Object.values(incomeGroups)) {
+    const sorted = [...entries].sort((a, b) => a.startDate.localeCompare(b.startDate));
+    for (
+      let month = new Date(rangeStart);
+      month <= rangeEnd;
+      month.setMonth(month.getMonth() + 1)
+    ) {
+      const monthStr = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
+      let applicable = null;
+      for (const entry of sorted) {
+        if (entry.startDate <= monthStr) applicable = entry;
+      }
+      if (applicable) {
+        if (!monthlyData[monthStr]) {
+          monthlyData[monthStr] = { income: 0, expenses: 0, incomeILS: 0, expensesILS: 0, usdFromILS: 0, recurring: 0, nonRecurring: 0 };
+        }
+        const rawAmount = parseFloat(applicable.monthlyAmount);
+        let amount = rawAmount;
+        if (applicable.currency === "ILS") {
+          monthlyData[monthStr].incomeILS += rawAmount;
+          const rate = ilsIncomeRates.get(`${monthStr}-01`) ?? 1;
+          amount = rawAmount * rate;
+        }
+        monthlyData[monthStr].income += amount;
+      }
+    }
+  }
+
   for (const tx of txns) {
     const rawAmount = parseFloat(tx.amount);
     let amount = rawAmount;

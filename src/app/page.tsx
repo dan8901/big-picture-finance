@@ -793,20 +793,24 @@ export default function DashboardPage() {
             <CardContent className="h-[280px] md:h-[350px]">
               {data && data.monthlyTrend.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={data.monthlyTrend.map((m) => ({ ...m, savings: m.income - m.expenses }))}>
+                  <LineChart data={data.monthlyTrend.map((m) => {
+                    const rate = data.weightedExchangeRate > 0 ? 1 / data.weightedExchangeRate : 1;
+                    return {
+                      ...m,
+                      recurringILS: m.recurring * rate,
+                      nonRecurringILS: m.nonRecurring * rate,
+                      savingsILS: (m.income - m.expenses) * rate,
+                    };
+                  })}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="month" />
                     <YAxis yAxisId="usd" />
                     <YAxis yAxisId="ils" orientation="right" />
                     <Tooltip
-                      formatter={(value, name, props) => {
+                      formatter={(value, name) => {
                         const v = Number(value);
-                        if (
-                          name === "Income (ILS)" ||
-                          name === "Expenses (ILS)"
-                        )
-                          return formatILS(v);
-                        return formatAmount(v);
+                        const ilsNames = ["Income (ILS)", "Expenses (ILS)", "Recurring (ILS)", "Non-recurring (ILS)", "Savings (ILS)"];
+                        return ilsNames.includes(name as string) ? formatILS(v) : formatAmount(v);
                       }}
                       labelFormatter={(label, payload) => {
                         if (!payload || payload.length === 0) return label;
@@ -855,33 +859,33 @@ export default function DashboardPage() {
                       hide={hiddenLines.has("expenses")}
                     />
                     <Line
-                      yAxisId="usd"
+                      yAxisId="ils"
                       type="monotone"
-                      dataKey="recurring"
+                      dataKey="recurringILS"
                       stroke="#2563eb"
                       strokeWidth={1.5}
                       strokeDasharray="4 4"
-                      name="Recurring"
-                      hide={hiddenLines.has("recurring")}
+                      name="Recurring (ILS)"
+                      hide={hiddenLines.has("recurringILS")}
                     />
                     <Line
-                      yAxisId="usd"
+                      yAxisId="ils"
                       type="monotone"
-                      dataKey="nonRecurring"
+                      dataKey="nonRecurringILS"
                       stroke="#94a3b8"
                       strokeWidth={1.5}
                       strokeDasharray="4 4"
-                      name="Non-recurring"
-                      hide={hiddenLines.has("nonRecurring")}
+                      name="Non-recurring (ILS)"
+                      hide={hiddenLines.has("nonRecurringILS")}
                     />
                     <Line
-                      yAxisId="usd"
+                      yAxisId="ils"
                       type="monotone"
-                      dataKey="savings"
+                      dataKey="savingsILS"
                       stroke="#9333ea"
                       strokeWidth={2}
-                      name="Savings"
-                      hide={hiddenLines.has("savings")}
+                      name="Savings (ILS)"
+                      hide={hiddenLines.has("savingsILS")}
                     />
                     <Line
                       yAxisId="ils"
