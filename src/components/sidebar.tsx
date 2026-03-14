@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: "LayoutDashboard" },
@@ -55,9 +54,6 @@ const icons: Record<string, React.ReactNode> = {
   ChevronRight: (
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
   ),
-  RefreshCw: (
-    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
-  ),
   LogOut: (
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
   ),
@@ -66,6 +62,9 @@ const icons: Record<string, React.ReactNode> = {
   ),
   X: (
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+  ),
+  Info: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
   ),
 };
 
@@ -95,8 +94,6 @@ export function Sidebar() {
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState({ done: 0, total: 0 });
 
   // Close mobile drawer on route change
   useEffect(() => {
@@ -113,45 +110,6 @@ export function Sidebar() {
     return () => { document.body.style.overflow = ""; };
   }, [mobileOpen]);
 
-  async function syncRates() {
-    setSyncing(true);
-    setSyncProgress({ done: 0, total: 0 });
-
-    try {
-      const checkRes = await fetch("/api/exchange-rates");
-      const { needed } = (await checkRes.json()) as { needed: string[] };
-
-      if (needed.length === 0) {
-        toast.success("All exchange rates already cached");
-        setSyncing(false);
-        return;
-      }
-
-      setSyncProgress({ done: 0, total: needed.length });
-
-      const BATCH_SIZE = 30;
-      let done = 0;
-
-      for (let i = 0; i < needed.length; i += BATCH_SIZE) {
-        const batch = needed.slice(i, i + BATCH_SIZE);
-        await fetch("/api/exchange-rates", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dates: batch }),
-        });
-        done += batch.length;
-        setSyncProgress({ done, total: needed.length });
-      }
-
-      toast.success(`Fetched ${needed.length} exchange rates`);
-      window.location.reload();
-    } catch {
-      toast.error("Failed to sync exchange rates");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   const bottomItems = (closeMobile?: () => void) => (
     <div className="border-t p-2 space-y-1">
       <Link
@@ -167,24 +125,19 @@ export function Sidebar() {
         {icons.EyeOff}
         Excluded
       </Link>
-      <button
-        onClick={() => { syncRates(); closeMobile?.(); }}
-        disabled={syncing}
+      <Link
+        href="/about"
+        onClick={closeMobile}
         className={cn(
-          "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full gap-3 px-3",
-          "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-          syncing && "animate-pulse"
+          "flex items-center rounded-md py-2 text-sm font-medium transition-colors gap-3 px-3",
+          pathname === "/about"
+            ? "bg-accent text-accent-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
         )}
       >
-        <span className={syncing ? "animate-spin" : ""}>{icons.RefreshCw}</span>
-        <span className="truncate">
-          {syncing
-            ? syncProgress.total > 0
-              ? `${syncProgress.done}/${syncProgress.total}`
-              : "Checking..."
-            : "Sync Rates"}
-        </span>
-      </button>
+        {icons.Info}
+        About
+      </Link>
       <button
         onClick={async () => {
           await fetch("/api/auth", { method: "DELETE" });
@@ -282,28 +235,20 @@ export function Sidebar() {
             {icons.EyeOff}
             {!collapsed && "Excluded"}
           </Link>
-          <button
-            onClick={syncRates}
-            disabled={syncing}
-            title={collapsed ? (syncing ? `Syncing ${syncProgress.done}/${syncProgress.total}` : "Sync Exchange Rates") : undefined}
+          <Link
+            href="/about"
+            title={collapsed ? "About" : undefined}
             className={cn(
-              "flex items-center rounded-md py-2 text-sm font-medium transition-colors w-full",
+              "flex items-center rounded-md py-2 text-sm font-medium transition-colors",
               collapsed ? "justify-center px-2" : "gap-3 px-3",
-              "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-              syncing && "animate-pulse"
+              pathname === "/about"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
           >
-            <span className={syncing ? "animate-spin" : ""}>{icons.RefreshCw}</span>
-            {!collapsed && (
-              <span className="truncate">
-                {syncing
-                  ? syncProgress.total > 0
-                    ? `${syncProgress.done}/${syncProgress.total}`
-                    : "Checking..."
-                  : "Sync Rates"}
-              </span>
-            )}
-          </button>
+            {icons.Info}
+            {!collapsed && "About"}
+          </Link>
           <button
             onClick={async () => {
               await fetch("/api/auth", { method: "DELETE" });

@@ -28,6 +28,7 @@ src/
 │   ├── chat/page.tsx               # AI chatbot — ask natural language questions about finances
 │   ├── goals/page.tsx              # Goals — budget caps, savings targets, streaks, gamification
 │   ├── settings/page.tsx           # LLM provider config + API usage/cost tracking
+│   ├── about/page.tsx              # About page — version display, update checker, update instructions
 │   └── api/
 │       ├── dashboard/route.ts      # Analytics: totals, breakdowns, trends, events, top txns
 │       ├── transactions/route.ts   # GET (filtered), POST (bulk import w/ dedup + logging), DELETE
@@ -58,6 +59,8 @@ src/
     ├── exchange.ts                 # Exchange rate DB cache reader
     ├── llm.ts                      # Unified LLM abstraction (OpenAI + Anthropic clients)
     ├── llm-presets.ts              # Provider presets, model lists, cost estimation
+    ├── version.ts                  # APP_VERSION, REPO_URL, REPO_API_URL constants
+    ├── auth-utils.ts               # getAuthSecret(), getCronSecret() — derive from DATABASE_URL if env var not set
     └── parsers/
         ├── types.ts                # ParsedTransaction, Parser interfaces
         ├── index.ts                # Parser registry (getParser, listParsers)
@@ -168,8 +171,8 @@ DB connection is lazy-initialized via Proxy in `src/db/index.ts` to avoid build-
 
 ```bash
 npm run dev          # Start dev server (http://localhost:3000)
-npx next build       # Production build (type-checks everything)
-npx drizzle-kit push # Push schema changes to Neon DB
+npm run build        # Production build (runs drizzle-kit push + next build)
+npx drizzle-kit push # Push schema changes to Neon DB (also runs automatically in build)
 ```
 
 ### AI Chatbot
@@ -197,9 +200,9 @@ npx drizzle-kit push # Push schema changes to Neon DB
 
 ```
 DATABASE_URL=postgresql://...@...neon.tech/neondb?sslmode=require
-AUTH_SECRET=...             # HMAC secret for signing auth cookies (openssl rand -hex 32)
 AUTH_PASSWORD=...           # Single password for login
-CRON_SECRET=...             # Protects the daily exchange rate sync cron endpoint
+AUTH_SECRET=...             # Optional — auto-derived from DATABASE_URL if not set
+CRON_SECRET=...             # Optional — auto-derived from DATABASE_URL if not set
 ```
 
 ### Dashboard Features
@@ -209,6 +212,7 @@ CRON_SECRET=...             # Protects the daily exchange rate sync cron endpoin
 - **Events table**: dedicated breakdown of trip/event spending with names, dates, totals
 - **Top one-time expenses**: 10 largest non-recurring transactions for spotting anomalies
 - **Loading skeleton**: summary cards show animated skeleton placeholders while fetching
+- **Welcome card**: first-run experience when no data exists — guides users to add accounts, upload statements, configure AI
 
 ### Import System
 - Upload page shows import history at the bottom (from `import_logs` table)
@@ -233,7 +237,7 @@ CRON_SECRET=...             # Protects the daily exchange rate sync cron endpoin
 
 - Drizzle `eq()` on enum columns requires exact type — use `sql` template for dynamic string values (see `chat/tools.ts` income source filter)
 - OpenAI SDK `ChatCompletionMessageToolCall` is a union type — filter with `tc.type === "function"` before accessing `tc.function`
-- No auth — single household app
+- Password-protected single household app
 - shadcn/ui components in `src/components/ui/` are generated — don't edit them
 - The `drizzle.config.ts` loads `.env.local` explicitly via dotenv (not auto-loaded)
 - All pages are client components (`"use client"`) — dashboard home page included
@@ -243,3 +247,8 @@ CRON_SECRET=...             # Protects the daily exchange rate sync cron endpoin
 - Net worth recording skips credit card accounts (assumed paid in full monthly)
 - Dashboard YTD default end date is last day of previous month
 - After adding/changing DB tables, run `npx drizzle-kit push` to sync schema to Neon
+- `AUTH_SECRET` and `CRON_SECRET` are auto-derived from `DATABASE_URL` via HMAC if env vars not set (`src/lib/auth-utils.ts`)
+- Build script runs `drizzle-kit push` before `next build` — tables auto-created on first deploy
+- Deploy button in README uses Vercel's Neon integration for auto-provisioning
+- `APP_VERSION` in `src/lib/version.ts` must be kept in sync with `package.json` version
+- About page (`/about`) checks GitHub releases API for updates — unauthenticated, 60 req/hr rate limit

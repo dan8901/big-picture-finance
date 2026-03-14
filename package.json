@@ -1,10 +1,14 @@
 {
   "name": "big_picture_finance",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dan8901/big-picture-finance"
+  },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npx drizzle-kit push && next build",
     "start": "next start",
     "lint": "eslint"
   },

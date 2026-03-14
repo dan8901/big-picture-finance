@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -273,6 +274,32 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Welcome card for first-run */}
+      {!loading && data && data.totalIncome === 0 && data.totalExpenses === 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Welcome to Big Picture Finance!</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p className="text-muted-foreground">Get started by setting up your accounts and importing data:</p>
+            <ol className="list-decimal list-inside space-y-2 ml-1">
+              <li>
+                <Link href="/accounts" className="text-blue-600 hover:underline dark:text-blue-400">Add your accounts</Link>
+                <span className="text-muted-foreground"> — bank accounts, credit cards, brokerages</span>
+              </li>
+              <li>
+                <Link href="/upload" className="text-blue-600 hover:underline dark:text-blue-400">Upload bank statements</Link>
+                <span className="text-muted-foreground"> — CSV, XLSX, or PDF files</span>
+              </li>
+              <li>
+                <Link href="/settings" className="text-blue-600 hover:underline dark:text-blue-400">Configure AI (optional)</Link>
+                <span className="text-muted-foreground"> — for automatic transaction categorization</span>
+              </li>
+            </ol>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

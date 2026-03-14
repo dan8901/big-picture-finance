@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac } from "crypto";
+import { getAuthSecret } from "@/lib/auth-utils";
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -9,7 +10,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const secret = process.env.AUTH_SECRET;
+  const secret = getAuthSecret();
   if (!secret) {
     // Auth not configured — allow through (dev convenience)
     return NextResponse.next();

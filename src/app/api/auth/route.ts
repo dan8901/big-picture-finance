@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac } from "crypto";
+import { getAuthSecret } from "@/lib/auth-utils";
 
 export async function POST(request: NextRequest) {
   try {
     const { password } = await request.json();
     const correctPassword = process.env.AUTH_PASSWORD;
-    const secret = process.env.AUTH_SECRET;
+    const secret = getAuthSecret();
 
     if (!correctPassword || !secret) {
       return NextResponse.json(

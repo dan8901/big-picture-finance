@@ -845,7 +845,6 @@ function TransactionsContent() {
                     </TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Account</TableHead>
-                    <TableHead>Owner</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Event</TableHead>
                     <TableHead
@@ -895,9 +894,13 @@ function TransactionsContent() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {accountName(tx.accountId)}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {accountOwner(tx.accountId)}
+                        {(() => {
+                          const owner = accountOwner(tx.accountId);
+                          const name = accountName(tx.accountId);
+                          return owner && !name.toLowerCase().includes(owner.toLowerCase()) ? (
+                            <Badge variant="outline" className="ml-1 text-[10px] px-1 py-0">{owner}</Badge>
+                          ) : null;
+                        })()}
                       </TableCell>
                       <TableCell>
                         {editingCategoryId === tx.id ? (

@@ -148,12 +148,11 @@ export default function AccountsPage() {
                 <Label htmlFor="name">Account Name</Label>
                 <Input
                   id="name"
-                  placeholder="e.g. Joint Checking"
+                  placeholder="Optional — defaults to Institution - Owner"
                   value={form.name}
                   onChange={(e) =>
                     setForm({ ...form, name: e.target.value })
                   }
-                  required
                 />
               </div>
               <div className="space-y-2">

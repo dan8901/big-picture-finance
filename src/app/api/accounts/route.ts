@@ -8,20 +8,37 @@ export async function GET() {
   return NextResponse.json(allAccounts);
 }
 
+const INSTITUTION_LABELS: Record<string, string> = {
+  isracard: "Isracard",
+  cal: "Cal",
+  max: "Max",
+  discover: "Discover",
+  sdfcu: "State Dept FCU",
+  fidelity: "Fidelity",
+  "bank-hapoalim": "Bank Hapoalim",
+  pepper: "Pepper Bank",
+  "interactive-brokers": "Interactive Brokers",
+  meitav: "Meitav",
+  harel: "Harel",
+};
+
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const { name, type, institution, currency, owner } = body;
 
-  if (!name || !type || !institution || !currency || !owner) {
+  if (!type || !institution || !currency || !owner) {
     return NextResponse.json(
-      { error: "All fields are required" },
+      { error: "Type, institution, currency, and owner are required" },
       { status: 400 }
     );
   }
 
+  const resolvedName =
+    name?.trim() || `${INSTITUTION_LABELS[institution] ?? institution} - ${owner}`;
+
   const [newAccount] = await db
     .insert(accounts)
-    .values({ name, type, institution, currency, owner })
+    .values({ name: resolvedName, type, institution, currency, owner })
     .returning();
 
   return NextResponse.json(newAccount, { status: 201 });

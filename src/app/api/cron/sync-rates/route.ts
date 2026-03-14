@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { exchangeRates } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { getCronSecret } from "@/lib/auth-utils";
 
 const BATCH_SIZE = 30;
 
@@ -29,11 +30,9 @@ async function fetchWithRetry(
 
 export async function GET(request: NextRequest) {
   // Verify cron secret (Vercel sets this automatically for cron routes)
+  const cronSecret = getCronSecret();
   const authHeader = request.headers.get("authorization");
-  if (
-    process.env.CRON_SECRET &&
-    authHeader !== `Bearer ${process.env.CRON_SECRET}`
-  ) {
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
