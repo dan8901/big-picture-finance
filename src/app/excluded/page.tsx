@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -42,12 +42,32 @@ interface Account {
 }
 
 export default function ExcludedPage() {
+  const initialized = useRef(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [sortBy, setSortBy] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [filterAccountId, setFilterAccountId] = useState<string>("all");
+
+  // Read filters from URL after mount (avoids hydration mismatch)
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("sortBy")) setSortBy(p.get("sortBy") as "date" | "amount");
+    if (p.get("sortDir")) setSortDir(p.get("sortDir") as "asc" | "desc");
+    if (p.get("account")) setFilterAccountId(p.get("account")!);
+  }, []);
+
+  // Write filters to URL when they change
+  useEffect(() => {
+    if (!initialized.current) { initialized.current = true; return; }
+    const params = new URLSearchParams();
+    if (filterAccountId !== "all") params.set("account", filterAccountId);
+    if (sortBy !== "date") params.set("sortBy", sortBy);
+    if (sortDir !== "desc") params.set("sortDir", sortDir);
+    const qs = params.toString();
+    window.history.replaceState({}, "", qs ? `/excluded?${qs}` : "/excluded");
+  }, [filterAccountId, sortBy, sortDir]);
 
   const fetchData = useCallback(async () => {
     const [txRes, acctRes] = await Promise.all([

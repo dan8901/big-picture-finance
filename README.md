@@ -18,12 +18,11 @@ Annual financial review app for households with accounts across multiple institu
 
 ## Deploy Your Own
 
-Click the **Deploy with Vercel** button above. You'll be prompted to:
+Make sure you're logged into [GitHub](https://github.com) and [Vercel](https://vercel.com) (free accounts work), then click the **Deploy with Vercel** button above. You only need to do one thing:
 
 1. **Set `AUTH_PASSWORD`** — choose a password to log into the app
-2. **Provision a Neon database** — Vercel will create one automatically
 
-That's it. The build process runs database migrations automatically. Auth secrets are derived from your database URL, so no extra configuration is needed.
+Everything else is automatic — Vercel provisions a Neon database, runs migrations on first build, and derives auth secrets from your database URL. Once deployed, Vercel will show you your app's URL (you can find it anytime in your [Vercel dashboard](https://vercel.com/dashboard)).
 
 ## Updating
 

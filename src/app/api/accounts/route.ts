@@ -8,6 +8,8 @@ export async function GET() {
   return NextResponse.json(allAccounts);
 }
 
+import { TRANSACTION_ACCOUNT_TYPES } from "@/lib/accounts";
+
 const INSTITUTION_LABELS: Record<string, string> = {
   isracard: "Isracard",
   cal: "Cal",
@@ -17,28 +19,47 @@ const INSTITUTION_LABELS: Record<string, string> = {
   fidelity: "Fidelity",
   "bank-hapoalim": "Bank Hapoalim",
   pepper: "Pepper Bank",
-  "interactive-brokers": "Interactive Brokers",
-  meitav: "Meitav",
-  harel: "Harel",
 };
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const { name, type, institution, currency, owner } = body;
 
-  if (!type || !institution || !currency || !owner) {
+  const isTransaction = (TRANSACTION_ACCOUNT_TYPES as readonly string[]).includes(type);
+
+  if (!type || !currency || !owner) {
     return NextResponse.json(
-      { error: "Type, institution, currency, and owner are required" },
+      { error: "Type, currency, and owner are required" },
       { status: 400 }
     );
   }
 
-  const resolvedName =
-    name?.trim() || `${INSTITUTION_LABELS[institution] ?? institution} - ${owner}`;
+  if (isTransaction && !institution) {
+    return NextResponse.json(
+      { error: "Institution is required for transaction accounts" },
+      { status: 400 }
+    );
+  }
+
+  if (!isTransaction && !name?.trim()) {
+    return NextResponse.json(
+      { error: "Name is required for balance-only accounts" },
+      { status: 400 }
+    );
+  }
+
+  const resolvedName = name?.trim()
+    || (institution ? `${INSTITUTION_LABELS[institution] ?? institution} - ${owner}` : type);
 
   const [newAccount] = await db
     .insert(accounts)
-    .values({ name: resolvedName, type, institution, currency, owner })
+    .values({
+      name: resolvedName,
+      type,
+      institution: isTransaction ? institution : null,
+      currency,
+      owner,
+    })
     .returning();
 
   return NextResponse.json(newAccount, { status: 201 });

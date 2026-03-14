@@ -73,6 +73,7 @@ function NavLink({ item, collapsed, pathname, onClick }: { item: typeof navItems
     <Link
       key={item.href}
       href={item.href}
+      prefetch={false}
       onClick={onClick}
       title={collapsed ? item.label : undefined}
       className={cn(

@@ -47,6 +47,8 @@ const CATEGORIES = [
   "Other",
 ];
 
+type AchievementRecord = { period: string; achieved: boolean; actualAmount: number };
+
 type GoalData = {
   id: number;
   name: string;
@@ -55,15 +57,18 @@ type GoalData = {
   category: string | null;
   owner: string | null;
   targetAmount: number;
+  monthlyTarget: number;
   currency: string;
-  period: "monthly" | "annual";
+  period: string;
   isActive: number;
   currentAmount: number;
   currentPeriod: string;
   progress: number;
   status: "on_track" | "at_risk" | "exceeded" | "achieved";
   streak: number;
-  history: { period: string; achieved: boolean; actualAmount: number }[];
+  history: AchievementRecord[];
+  monthlyHistory: AchievementRecord[];
+  annualHistory: AchievementRecord[];
 };
 
 const fmt = (n: number) =>
@@ -259,8 +264,7 @@ function GoalCard({
         <div className="min-w-0">
           <h3 className="font-medium truncate">{goal.name}</h3>
           <p className="text-xs text-muted-foreground">
-            {goal.type === "budget_cap" ? "Budget Cap" : goal.type === "savings_amount" ? "Savings Goal" : "Savings %"} /{" "}
-            {goal.period === "monthly" ? "mo" : "yr"}
+            {goal.type === "budget_cap" ? "Budget Cap" : goal.type === "savings_amount" ? "Savings Goal" : "Savings %"} / yr
             {goal.owner && ` / ${goal.owner}`}
           </p>
         </div>
@@ -326,6 +330,11 @@ function GoalCard({
                 : `${fmt(goal.targetAmount)}%`}
             </span>
           </div>
+          {showsAmount && (
+            <div className="text-xs text-muted-foreground">
+              {fmtCurrency(goal.monthlyTarget, goal.currency)}/mo
+            </div>
+          )}
           <div className={`text-xs font-medium ${statusColor(goal.status)}`}>
             {statusLabel(goal)}
           </div>
@@ -403,7 +412,6 @@ function CreateGoalDialog({
   const [owner, setOwner] = useState("");
   const [targetAmount, setTargetAmount] = useState("");
   const [currency, setCurrency] = useState("ILS");
-  const [period, setPeriod] = useState<"monthly" | "annual">("monthly");
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -421,7 +429,6 @@ function CreateGoalDialog({
           owner: owner || null,
           targetAmount: parseFloat(targetAmount),
           currency,
-          period,
         }),
       });
       if (!res.ok) throw new Error("Failed to create goal");
@@ -458,36 +465,21 @@ function CreateGoalDialog({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm font-medium">Type</label>
-              <select
-                value={type}
-                onChange={(e) => {
-                  const v = e.target.value as "budget_cap" | "savings_target" | "savings_amount";
-                  setType(v);
-                  if (v !== "budget_cap") setScope("overall");
-                }}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                <option value="budget_cap">Budget Cap</option>
-                <option value="savings_amount">Savings Goal ($)</option>
-                <option value="savings_target">Savings Rate (%)</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium">Period</label>
-              <select
-                value={period}
-                onChange={(e) =>
-                  setPeriod(e.target.value as "monthly" | "annual")
-                }
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                <option value="monthly">Monthly</option>
-                <option value="annual">Annual</option>
-              </select>
-            </div>
+          <div>
+            <label className="text-sm font-medium">Type</label>
+            <select
+              value={type}
+              onChange={(e) => {
+                const v = e.target.value as "budget_cap" | "savings_target" | "savings_amount";
+                setType(v);
+                if (v !== "budget_cap") setScope("overall");
+              }}
+              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <option value="budget_cap">Budget Cap</option>
+              <option value="savings_amount">Savings Goal ($)</option>
+              <option value="savings_target">Savings Rate (%)</option>
+            </select>
           </div>
 
           {type === "budget_cap" && (
@@ -527,7 +519,7 @@ function CreateGoalDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-medium">
-                Target {type === "savings_target" ? "(%)" : "Amount"}
+                {type === "savings_target" ? "Target (%)" : "Annual Target"}
               </label>
               <input
                 type="number"
@@ -536,8 +528,13 @@ function CreateGoalDialog({
                 onChange={(e) => setTargetAmount(e.target.value)}
                 required
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder={type === "savings_target" ? "40" : "500"}
+                placeholder={type === "savings_target" ? "40" : "12000"}
               />
+              {targetAmount && type !== "savings_target" && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Monthly: {currency === "ILS" ? "\u20AA" : "$"}{Math.round(parseFloat(targetAmount) / 12).toLocaleString()}/mo
+                </p>
+              )}
             </div>
             {type !== "savings_target" && (
               <div>
@@ -709,7 +706,7 @@ function EditGoalDialog({
           </div>
 
           <div className="text-xs text-muted-foreground">
-            Type: {typeLabel} / {goal.period}
+            Type: {typeLabel}
             {goal.scope === "category" && ` / ${goal.category}`}
           </div>
 
@@ -740,7 +737,6 @@ export default function GoalsPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editingGoal, setEditingGoal] = useState<GoalData | null>(null);
-  const [evaluating, setEvaluating] = useState(false);
   const [reordering, setReordering] = useState(false);
 
   const sensors = useSensors(
@@ -779,88 +775,17 @@ export default function GoalsPage() {
     fetchGoals();
   }
 
-  async function handleEvaluate() {
-    setEvaluating(true);
-    try {
-      // Generate last 6 months as periods
-      const periods: string[] = [];
-      const now = new Date();
-      for (let i = 1; i <= 6; i++) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        periods.push(
-          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-        );
-      }
-
-      const res = await fetch("/api/goals/evaluate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ periods }),
-      });
-      const { results } = await res.json();
-
-      const newAchievements = results.filter(
-        (r: { achieved: boolean }) => r.achieved
-      ).length;
-
-      if (newAchievements > 0) {
-        toast.success(
-          `${newAchievements} goal${newAchievements > 1 ? "s" : ""} achieved!`
-        );
-        // Fire confetti
-        try {
-          const confetti = (await import("canvas-confetti")).default;
-          confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { y: 0.6 },
-          });
-
-          // Check for streak milestones
-          const hasStreakMilestone = results.some(
-            (r: { achieved: boolean; goalId: number }) => {
-              if (!r.achieved) return false;
-              const goal = goalsData.find((g) => g.id === r.goalId);
-              const newStreak = (goal?.streak ?? 0) + 1;
-              return [3, 6, 12].includes(newStreak);
-            }
-          );
-          if (hasStreakMilestone) {
-            setTimeout(() => {
-              confetti({
-                particleCount: 200,
-                spread: 100,
-                origin: { y: 0.5 },
-              });
-              toast.success("Streak milestone reached!");
-            }, 800);
-          }
-        } catch {
-          // confetti import failed, no big deal
-        }
-      } else {
-        toast("Evaluation complete — no new achievements this time");
-      }
-
-      fetchGoals();
-    } catch {
-      toast.error("Failed to evaluate goals");
-    } finally {
-      setEvaluating(false);
-    }
-  }
-
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
-    const annualActive = goalsData.filter((g) => g.isActive && g.period === "annual");
-    const oldIndex = annualActive.findIndex((g) => g.id === active.id);
-    const newIndex = annualActive.findIndex((g) => g.id === over.id);
+    const activeList = goalsData.filter((g) => g.isActive);
+    const oldIndex = activeList.findIndex((g) => g.id === active.id);
+    const newIndex = activeList.findIndex((g) => g.id === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
 
-    const reordered = arrayMove(annualActive, oldIndex, newIndex);
-    const rest = goalsData.filter((g) => !(g.isActive && g.period === "annual"));
+    const reordered = arrayMove(activeList, oldIndex, newIndex);
+    const rest = goalsData.filter((g) => !g.isActive);
     setGoalsData([...reordered, ...rest]);
 
     try {
@@ -875,8 +800,7 @@ export default function GoalsPage() {
     }
   }
 
-  const activeGoals = goalsData.filter((g) => g.isActive && g.period === "annual");
-  const monthlyGoals = goalsData.filter((g) => g.isActive && g.period === "monthly");
+  const activeGoals = goalsData.filter((g) => g.isActive);
   const inactiveGoals = goalsData.filter((g) => !g.isActive);
   const totalBadges = goalsData.reduce(
     (sum, g) => sum + g.history.filter((h) => h.achieved).length,
@@ -923,21 +847,12 @@ export default function GoalsPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Goals</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={handleEvaluate}
-            disabled={evaluating || (activeGoals.length === 0 && monthlyGoals.length === 0)}
-            className="px-3 py-1.5 text-sm rounded-md border hover:bg-accent disabled:opacity-50"
-          >
-            {evaluating ? "Evaluating..." : "Evaluate Past Months"}
-          </button>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            + New Goal
-          </button>
-        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
+        >
+          + New Goal
+        </button>
       </div>
 
       {/* Summary Banner */}
@@ -977,7 +892,7 @@ export default function GoalsPage() {
       </div>
 
       {/* Active Goals Grid */}
-      {activeGoals.length === 0 && monthlyGoals.length === 0 && inactiveGoals.length === 0 ? (
+      {activeGoals.length === 0 && inactiveGoals.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <p className="text-lg">No goals yet</p>
           <p className="text-sm mt-1">
@@ -1042,57 +957,6 @@ export default function GoalsPage() {
             </div>
           )}
 
-          {monthlyGoals.length > 0 && (
-            <div>
-              <h2 className="text-lg font-semibold mb-3">Monthly Goals</h2>
-              <div className="rounded-lg border divide-y">
-                {monthlyGoals.map((goal) => (
-                  <div key={goal.id} className="flex items-center justify-between px-4 py-3">
-                    <div className="min-w-0">
-                      <span className="font-medium">{goal.name}</span>
-                      <span className="text-xs text-muted-foreground ml-2">
-                        {goal.type === "budget_cap" ? "Budget Cap" : goal.type === "savings_amount" ? "Savings Goal" : "Savings %"}
-                        {goal.owner && ` / ${goal.owner}`}
-                        {goal.category && ` / ${goal.category}`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {goal.streak > 0 && (
-                        <span className="text-xs bg-orange-500/10 text-orange-500 px-1.5 py-0.5 rounded-full font-medium">
-                          {goal.streak} streak
-                        </span>
-                      )}
-                      <span className="text-xs text-muted-foreground">
-                        Target: {goal.type === "savings_target" ? `${goal.targetAmount}%` : `${goal.currency === "ILS" ? "₪" : "$"}${goal.targetAmount.toLocaleString()}`}
-                      </span>
-                      <button
-                        onClick={() => setEditingGoal(goal)}
-                        className="text-xs text-muted-foreground hover:text-foreground p-1"
-                      >
-                        edit
-                      </button>
-                      <button
-                        onClick={() => handleToggle(goal.id, false)}
-                        className="text-xs text-muted-foreground hover:text-foreground p-1"
-                      >
-                        OFF
-                      </button>
-                      <button
-                        onClick={() => handleDelete(goal.id)}
-                        className="text-xs text-muted-foreground hover:text-red-500 p-1"
-                      >
-                        x
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                Monthly goals are tracked in the Achievement History table below.
-              </p>
-            </div>
-          )}
-
           {inactiveGoals.length > 0 && (
             <div>
               <h2 className="text-lg font-semibold mb-3">Inactive Goals</h2>
@@ -1113,7 +977,7 @@ export default function GoalsPage() {
       )}
 
       {/* Achievement History */}
-      {goalsData.some((g) => g.history.length > 0) && (
+      {goalsData.some((g) => g.monthlyHistory.length > 0 || g.annualHistory.length > 0) && (
         <div>
           <h2 className="text-lg font-semibold mb-3">Achievement History</h2>
           <div className="rounded-lg border overflow-x-auto">
@@ -1124,10 +988,14 @@ export default function GoalsPage() {
                   {(() => {
                     const allPeriods = new Set<string>();
                     for (const g of goalsData) {
-                      for (const h of g.history) allPeriods.add(h.period);
+                      for (const h of g.monthlyHistory) allPeriods.add(h.period);
+                      for (const h of g.annualHistory) allPeriods.add(h.period);
                     }
-                    return [...allPeriods].sort().map((p) => (
-                      <th key={p} className="text-center p-3 font-medium">
+                    // Sort: monthly periods first (sorted), then annual periods
+                    const monthly = [...allPeriods].filter((p) => p.includes("-")).sort();
+                    const annual = [...allPeriods].filter((p) => !p.includes("-")).sort();
+                    return [...monthly, ...annual].map((p) => (
+                      <th key={p} className={`text-center p-3 font-medium ${!p.includes("-") ? "border-l-2 border-border" : ""}`}>
                         {formatPeriod(p)}
                       </th>
                     ));
@@ -1138,20 +1006,26 @@ export default function GoalsPage() {
                 {(() => {
                   const allPeriods = new Set<string>();
                   for (const g of goalsData) {
-                    for (const h of g.history) allPeriods.add(h.period);
+                    for (const h of g.monthlyHistory) allPeriods.add(h.period);
+                    for (const h of g.annualHistory) allPeriods.add(h.period);
                   }
-                  const sortedPeriods = [...allPeriods].sort();
+                  const monthly = [...allPeriods].filter((p) => p.includes("-")).sort();
+                  const annual = [...allPeriods].filter((p) => !p.includes("-")).sort();
+                  const sortedPeriods = [...monthly, ...annual];
                   return goalsData
-                    .filter((g) => g.history.length > 0)
+                    .filter((g) => g.monthlyHistory.length > 0 || g.annualHistory.length > 0)
                     .map((g) => {
-                      const byPeriod = new Map(g.history.map((h) => [h.period, h]));
+                      const byPeriod = new Map([
+                        ...g.monthlyHistory.map((h) => [h.period, h] as const),
+                        ...g.annualHistory.map((h) => [h.period, h] as const),
+                      ]);
                       return (
                         <tr key={g.id} className="border-b last:border-0">
                           <td className="p-3 font-medium">{g.name}</td>
                           {sortedPeriods.map((p) => {
                             const h = byPeriod.get(p);
                             return (
-                              <td key={p} className="text-center p-3">
+                              <td key={p} className={`text-center p-3 ${!p.includes("-") ? "border-l-2 border-border" : ""}`}>
                                 {h ? (
                                   <span
                                     title={`${h.actualAmount}`}
@@ -1160,7 +1034,7 @@ export default function GoalsPage() {
                                     {h.achieved ? "\u2713" : "\u2717"}
                                   </span>
                                 ) : (
-                                  <span className="text-muted-foreground">\u2014</span>
+                                  <span className="text-muted-foreground">{"\u2014"}</span>
                                 )}
                               </td>
                             );

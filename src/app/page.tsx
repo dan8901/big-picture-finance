@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Fragment } from "react";
+import { useEffect, useState, useCallback, Fragment, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -21,6 +21,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   PieChart,
   Pie,
@@ -93,6 +99,9 @@ interface DashboardData {
     category: string;
     owner: string;
   }>;
+  earliestDate: string | null;
+  allDataStartDate: string | null;
+  allStartDateOverride: string | null;
 }
 
 interface MerchantData {
@@ -129,27 +138,65 @@ function formatAmount(amount: number) {
   }).format(amount);
 }
 
+// Module-level cache — survives component unmount/remount
+let dashboardCache: { key: string; data: DashboardData; prevData: DashboardData | null } | null = null;
+
 export default function DashboardPage() {
   const router = useRouter();
+  const initialized = useRef(false);
   const currentYear = new Date().getFullYear();
   const lastDayPrevMonth = (() => {
     const d = new Date();
     d.setDate(0);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   })();
-  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
+  const defaultStartDate = `${currentYear}-01-01`;
+  const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(lastDayPrevMonth);
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [prevData, setPrevData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [urlReady, setUrlReady] = useState(false);
+
+  // Read date range from URL after mount (avoids hydration mismatch)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sd = params.get("startDate");
+    const ed = params.get("endDate");
+    if (sd) setStartDate(sd);
+    if (ed) setEndDate(ed);
+    setUrlReady(true);
+  }, []);
+
+  // Write date range to URL when it changes
+  useEffect(() => {
+    if (!initialized.current) { initialized.current = true; return; }
+    const params = new URLSearchParams();
+    if (startDate !== defaultStartDate) params.set("startDate", startDate);
+    if (endDate !== lastDayPrevMonth) params.set("endDate", endDate);
+    const qs = params.toString();
+    window.history.replaceState({}, "", qs ? `/?${qs}` : "/");
+  }, [startDate, endDate]);
+  const [data, setData] = useState<DashboardData | null>(dashboardCache?.data ?? null);
+  const [prevData, setPrevData] = useState<DashboardData | null>(dashboardCache?.prevData ?? null);
+  const [loading, setLoading] = useState(!dashboardCache);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [hiddenLines, setHiddenLines] = useState<Set<string>>(new Set());
+  const [allDateDialogOpen, setAllDateDialogOpen] = useState(false);
+  const [allDateInput, setAllDateInput] = useState("");
 
   const fetchData = useCallback(async () => {
+    if (!urlReady) return;
+    const cacheKey = `${startDate}|${endDate}`;
+    // Restore from cache instantly if available (avoids skeleton on remount)
+    if (dashboardCache?.key === cacheKey) {
+      setData(dashboardCache.data);
+      setPrevData(dashboardCache.prevData);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const params = new URLSearchParams({ startDate, endDate });
     const res = await fetch(`/api/dashboard?${params}`);
-    setData(await res.json());
+    const freshData = await res.json();
+    setData(freshData);
 
     // Fetch previous year for comparison
     const prevStart = startDate.replace(/^\d{4}/, String(parseInt(startDate) - 1));
@@ -157,14 +204,11 @@ export default function DashboardPage() {
     const prevParams = new URLSearchParams({ startDate: prevStart, endDate: prevEnd });
     const prevRes = await fetch(`/api/dashboard?${prevParams}`);
     const prevJson = await prevRes.json();
-    // Only set if there's actual data
-    if (prevJson.totalIncome > 0 || prevJson.totalExpenses > 0) {
-      setPrevData(prevJson);
-    } else {
-      setPrevData(null);
-    }
+    const freshPrevData = (prevJson.totalIncome > 0 || prevJson.totalExpenses > 0) ? prevJson : null;
+    setPrevData(freshPrevData);
     setLoading(false);
-  }, [startDate, endDate]);
+    dashboardCache = { key: cacheKey, data: freshData, prevData: freshPrevData };
+  }, [startDate, endDate, urlReady]);
 
   useEffect(() => {
     fetchData();
@@ -218,41 +262,63 @@ export default function DashboardPage() {
         </div>
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex gap-1 items-end">
-            <Button
-              variant={startDate === "2024-10-01" && endDate === lastDayPrevMonth ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                setStartDate("2024-10-01");
-                setEndDate(lastDayPrevMonth);
-              }}
-            >
-              All
-            </Button>
-            <Button
-              variant={startDate === "2025-01-01" && endDate === "2025-12-31" ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                setStartDate("2025-01-01");
-                setEndDate("2025-12-31");
-              }}
-            >
-              2025
-            </Button>
-            <Button
-              variant={
-                startDate === `${currentYear}-01-01` &&
-                endDate === lastDayPrevMonth
-                  ? "default"
-                  : "outline"
-              }
-              size="sm"
-              onClick={() => {
-                setStartDate(`${currentYear}-01-01`);
-                setEndDate(lastDayPrevMonth);
-              }}
-            >
-              YTD
-            </Button>
+            {(() => {
+              const earliest = data?.earliestDate ?? null;
+              const override = data?.allStartDateOverride ?? null;
+              const computed = data?.allDataStartDate ?? earliest;
+              const allStart = override ?? computed;
+              const earliestYear = earliest ? parseInt(earliest) : currentYear;
+              const years = [];
+              for (let y = earliestYear; y <= currentYear; y++) years.push(y);
+              const showAll = allStart && years.length > 1;
+              return (
+                <>
+                  {showAll && (
+                    <span className="flex items-center gap-0.5">
+                      <Button
+                        variant={startDate === allStart && endDate === lastDayPrevMonth ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setStartDate(allStart);
+                          setEndDate(lastDayPrevMonth);
+                        }}
+                      >
+                        All
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-muted-foreground"
+                        title={`All starts from ${allStart}${override ? " (custom)" : " (auto)"}`}
+                        onClick={() => {
+                          setAllDateInput(allStart);
+                          setAllDateDialogOpen(true);
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                      </Button>
+                    </span>
+                  )}
+                  {years.map((y) => {
+                    const yStart = `${y}-01-01`;
+                    const yEnd = y === currentYear ? lastDayPrevMonth : `${y}-12-31`;
+                    return (
+                      <Button
+                        key={y}
+                        variant={startDate === yStart && endDate === yEnd ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setStartDate(yStart);
+                          setEndDate(yEnd);
+                        }}
+                      >
+                        {y === currentYear ? "YTD" : y}
+                      </Button>
+                    );
+                  })}
+                </>
+              );
+            })()}
           </div>
           <div className="space-y-1">
             <Label>From</Label>
@@ -274,6 +340,40 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      <Dialog open={allDateDialogOpen} onOpenChange={setAllDateDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Set &quot;All&quot; Start Date</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Start date for the &quot;All&quot; button</Label>
+              <Input
+                type="date"
+                value={allDateInput}
+                onChange={(e) => setAllDateInput(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={async () => {
+                  await fetch("/api/app-config", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ allStartDate: allDateInput }),
+                  });
+                  setStartDate(allDateInput);
+                  setEndDate(lastDayPrevMonth);
+                  setAllDateDialogOpen(false);
+                }}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Welcome card for first-run */}
       {!loading && data && data.totalIncome === 0 && data.totalExpenses === 0 && (

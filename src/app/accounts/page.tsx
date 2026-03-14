@@ -28,6 +28,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -38,17 +40,17 @@ interface Account {
   id: number;
   name: string;
   type: string;
-  institution: string;
+  institution: string | null;
   currency: string;
   owner: string;
 }
 
 const ACCOUNT_TYPES = [
-  { value: "bank", label: "Bank" },
-  { value: "credit_card", label: "Credit Card" },
-  { value: "brokerage", label: "Brokerage" },
-  { value: "pension", label: "Pension" },
-  { value: "keren_hishtalmut", label: "Keren Hishtalmut" },
+  { value: "bank", label: "Bank (statements)" },
+  { value: "credit_card", label: "Credit Card (statements)" },
+  { value: "brokerage", label: "Brokerage (balance only)" },
+  { value: "pension", label: "Pension (balance only)" },
+  { value: "keren_hishtalmut", label: "Keren Hishtalmut (balance only)" },
 ];
 
 const INSTITUTIONS = [
@@ -60,10 +62,9 @@ const INSTITUTIONS = [
   { value: "fidelity", label: "Fidelity" },
   { value: "bank-hapoalim", label: "Bank Hapoalim" },
   { value: "pepper", label: "Pepper Bank" },
-  { value: "interactive-brokers", label: "Interactive Brokers" },
-  { value: "meitav", label: "Meitav" },
-  { value: "harel", label: "Harel" },
 ];
+
+const TRANSACTION_TYPES = ["bank", "credit_card"];
 
 const CURRENCIES = [
   { value: "USD", label: "USD ($)" },
@@ -73,6 +74,7 @@ const CURRENCIES = [
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
   const [form, setForm] = useState({
     name: "",
     type: "",
@@ -103,15 +105,12 @@ export default function AccountsPage() {
     fetchAccounts();
   }
 
-  async function handleDelete(account: Account) {
-    const confirmed = window.confirm(
-      `Delete "${account.name}"? This will also delete all its transactions and net worth snapshots.`
-    );
-    if (!confirmed) return;
-
-    const res = await fetch(`/api/accounts?id=${account.id}`, {
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    const res = await fetch(`/api/accounts?id=${deleteTarget.id}`, {
       method: "DELETE",
     });
+    setDeleteTarget(null);
     if (!res.ok) {
       const data = await res.json();
       alert(data.error ?? "Failed to delete account");
@@ -119,6 +118,8 @@ export default function AccountsPage() {
     }
     fetchAccounts();
   }
+
+  const isTransactionType = TRANSACTION_TYPES.includes(form.type);
 
   const institutionLabel = (value: string) =>
     INSTITUTIONS.find((i) => i.value === value)?.label ?? value;
@@ -145,21 +146,14 @@ export default function AccountsPage() {
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Account Name</Label>
-                <Input
-                  id="name"
-                  placeholder="Optional — defaults to Institution - Owner"
-                  value={form.name}
-                  onChange={(e) =>
-                    setForm({ ...form, name: e.target.value })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
                 <Label>Type</Label>
                 <Select
                   value={form.type}
-                  onValueChange={(v) => setForm({ ...form, type: v })}
+                  onValueChange={(v) => setForm({
+                    ...form,
+                    type: v,
+                    institution: TRANSACTION_TYPES.includes(v) ? form.institution : "",
+                  })}
                   required
                 >
                   <SelectTrigger>
@@ -174,24 +168,36 @@ export default function AccountsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {isTransactionType ? (
+                <div className="space-y-2">
+                  <Label>Institution</Label>
+                  <Select
+                    value={form.institution}
+                    onValueChange={(v) => setForm({ ...form, institution: v })}
+                    required
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select institution" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INSTITUTIONS.map((i) => (
+                        <SelectItem key={i.value} value={i.value}>
+                          {i.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
               <div className="space-y-2">
-                <Label>Institution</Label>
-                <Select
-                  value={form.institution}
-                  onValueChange={(v) => setForm({ ...form, institution: v })}
-                  required
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select institution" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {INSTITUTIONS.map((i) => (
-                      <SelectItem key={i.value} value={i.value}>
-                        {i.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="name">Account Name</Label>
+                <Input
+                  id="name"
+                  placeholder={isTransactionType ? "Optional — defaults to Institution - Owner" : "e.g. Meitav Pension"}
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required={!isTransactionType}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Currency</Label>
@@ -260,7 +266,7 @@ export default function AccountsPage() {
                     <TableCell className="font-medium">
                       {account.name}
                     </TableCell>
-                    <TableCell>{institutionLabel(account.institution)}</TableCell>
+                    <TableCell>{account.institution ? institutionLabel(account.institution) : "—"}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">
                         {typeLabel(account.type)}
@@ -272,7 +278,8 @@ export default function AccountsPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDelete(account)}
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => setDeleteTarget(account)}
                       >
                         Delete
                       </Button>
@@ -285,6 +292,21 @@ export default function AccountsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete &quot;{deleteTarget?.name}&quot;?</DialogTitle>
+            <DialogDescription>
+              This action is irreversible. All transactions, net worth snapshots, exclusion rules, and import history associated with this account will be permanently deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete}>Delete Account</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

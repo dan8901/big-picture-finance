@@ -22,7 +22,7 @@ export const accounts = pgTable("accounts", {
       "keren_hishtalmut",
     ],
   }).notNull(),
-  institution: text("institution").notNull(),
+  institution: text("institution"),
   currency: text("currency", { enum: ["USD", "ILS"] }).notNull(),
   owner: text("owner").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -194,6 +194,12 @@ export const llmUsageLogs = pgTable("llm_usage_logs", {
   outputTokens: integer("output_tokens").notNull(),
   estimatedCost: numeric("estimated_cost", { precision: 10, scale: 6 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const appConfig = pgTable("app_config", {
+  id: serial("id").primaryKey(),
+  allStartDate: date("all_start_date"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const importLogs = pgTable("import_logs", {

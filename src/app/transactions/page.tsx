@@ -1,7 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -81,16 +80,17 @@ const STANDARD_CATEGORIES = [
   "Other",
 ];
 
+// Module-level cache — survives component unmount/remount
+let txCache: { key: string; transactions: Transaction[] } | null = null;
+
 export default function TransactionsPage() {
-  return (
-    <Suspense>
-      <TransactionsContent />
-    </Suspense>
-  );
+  return <TransactionsContent />;
 }
 
 function TransactionsContent() {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const initialized = useRef(false);
+
+  const [transactions, setTransactions] = useState<Transaction[]>(txCache?.transactions ?? []);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [search, setSearch] = useState("");
@@ -104,7 +104,7 @@ function TransactionsContent() {
   const [sortBy, setSortBy] = useState<"date" | "amount">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!txCache);
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
   const [actionsForTx, setActionsForTx] = useState<Transaction | null>(null);
   const [categorizing, setCategorizing] = useState(false);
@@ -116,19 +116,52 @@ function TransactionsContent() {
     startDate: "",
     endDate: "",
   });
+  const [urlReady, setUrlReady] = useState(false);
 
-  const searchParams = useSearchParams();
-
+  // Read all filters from URL after mount (avoids hydration mismatch)
   useEffect(() => {
-    const cat = searchParams.get("category");
-    const start = searchParams.get("startDate");
-    const end = searchParams.get("endDate");
-    if (cat) setCategoryFilter(new Set([cat]));
-    if (start) setStartDate(start);
-    if (end) setEndDate(end);
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("search")) setSearch(p.get("search")!);
+    if (p.get("account")) setAccountFilter(new Set(p.get("account")!.split(",")));
+    if (p.get("owner")) setOwnerFilter(p.get("owner")!);
+    if (p.get("category")) setCategoryFilter(new Set(p.get("category")!.split(",")));
+    if (p.get("type")) setTypeFilter(p.get("type") as "all" | "expenses" | "income");
+    if (p.get("startDate")) setStartDate(p.get("startDate")!);
+    if (p.get("endDate")) setEndDate(p.get("endDate")!);
+    if (p.get("sortBy")) setSortBy(p.get("sortBy") as "date" | "amount");
+    if (p.get("sortDir")) setSortDir(p.get("sortDir") as "asc" | "desc");
+    if (p.get("showExcluded") === "1") setShowExcluded(true);
+    setUrlReady(true);
   }, []);
 
+  // Write filters to URL when they change
+  useEffect(() => {
+    if (!initialized.current) { initialized.current = true; return; }
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (accountFilter.size) params.set("account", [...accountFilter].join(","));
+    if (ownerFilter !== "all") params.set("owner", ownerFilter);
+    if (categoryFilter.size) params.set("category", [...categoryFilter].join(","));
+    if (typeFilter !== "all") params.set("type", typeFilter);
+    if (startDate) params.set("startDate", startDate);
+    if (endDate) params.set("endDate", endDate);
+    if (sortBy !== "date") params.set("sortBy", sortBy);
+    if (sortDir !== "desc") params.set("sortDir", sortDir);
+    if (showExcluded) params.set("showExcluded", "1");
+    const qs = params.toString();
+    window.history.replaceState({}, "", qs ? `/transactions?${qs}` : "/transactions");
+  }, [search, accountFilter, ownerFilter, categoryFilter, typeFilter, startDate, endDate, sortBy, sortDir, showExcluded]);
+
   const fetchTransactions = useCallback(async () => {
+    if (!urlReady) return;
+    const cacheKey = `${startDate}|${endDate}|${sortBy}|${sortDir}`;
+    // Restore from cache instantly if available (avoids skeleton on remount)
+    if (txCache?.key === cacheKey) {
+      setTransactions(txCache.transactions);
+      setLoading(false);
+      return;
+    }
+    txCache = null; // Clear stale cache before fetching
     setLoading(true);
     const params = new URLSearchParams();
     if (startDate) params.set("startDate", startDate);
@@ -141,8 +174,9 @@ function TransactionsContent() {
     const res = await fetch(`/api/transactions?${params}`);
     const data = await res.json();
     setTransactions(data.transactions);
+    txCache = { key: cacheKey, transactions: data.transactions };
     setLoading(false);
-  }, [startDate, endDate, sortBy, sortDir]);
+  }, [startDate, endDate, sortBy, sortDir, urlReady]);
 
   const fetchAccounts = useCallback(async () => {
     const res = await fetch("/api/accounts");

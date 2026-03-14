@@ -35,6 +35,7 @@ src/
 │       ├── transactions/bulk/route.ts # PATCH: bulk category/event/exclude updates
 │       ├── upload/route.ts         # Parse files via parser registry
 │       ├── accounts/route.ts       # CRUD
+│       ├── app-config/route.ts     # GET/PUT app-level config (e.g., All button start date)
 │       ├── income/route.ts         # CRUD + PUT for editing
 │       ├── net-worth/route.ts      # CRUD with account joins
 │       ├── events/route.ts         # CRUD for trip/event tagging
@@ -59,8 +60,10 @@ src/
     ├── exchange.ts                 # Exchange rate DB cache reader
     ├── llm.ts                      # Unified LLM abstraction (OpenAI + Anthropic clients)
     ├── llm-presets.ts              # Provider presets, model lists, cost estimation
+    ├── evaluate-goals.ts           # Shared goal evaluation logic (auto-evaluate on data change + stale check)
     ├── version.ts                  # APP_VERSION, REPO_URL, REPO_API_URL constants
     ├── auth-utils.ts               # getAuthSecret(), getCronSecret() — derive from DATABASE_URL if env var not set
+    ├── accounts.ts                 # TRANSACTION_ACCOUNT_TYPES constant
     └── parsers/
         ├── types.ts                # ParsedTransaction, Parser interfaces
         ├── index.ts                # Parser registry (getParser, listParsers)
@@ -71,14 +74,18 @@ src/
         ├── discover.ts             # ✅ Discover credit card (CSV)
         ├── sdfcu.ts                # ✅ State Dept FCU (CSV)
         ├── fidelity.ts             # ✅ Fidelity cash management (CSV)
-        ├── interactive-brokers.ts  # ✅ IBKR (CSV, auto-excludes Buy/Sell/Forex)
         ├── max.ts                  # ✅ Max credit card (XLSX, Hebrew, 2 sheets)
-        ├── pepper.ts               # ✅ Pepper Bank (PDF via pdftotext)
-        ├── meitav.ts               # ❌ Stub
-        └── harel.ts                # ❌ Stub
+        └── pepper.ts               # ✅ Pepper Bank (PDF via pdftotext)
 ```
 
 ## Key Conventions
+
+### Account Types
+- **Transaction accounts** (`bank`, `credit_card`): upload statements via parsers, transactions appear on dashboard
+- **Balance-only accounts** (`brokerage`, `pension`, `keren_hishtalmut`): net worth snapshots + manual income entries (distributions), no statement uploads
+- `TRANSACTION_ACCOUNT_TYPES` constant in `src/lib/accounts.ts` — used by dashboard API (date range calculation) and upload page (account filtering)
+- Upload page only shows transaction accounts in the dropdown
+- Dashboard "All" button date is computed from transaction accounts only (max of each account's earliest transaction)
 
 ### Amounts
 - **Expenses are negative, income is positive** throughout the entire codebase
@@ -150,7 +157,7 @@ src/
 ## Database
 
 14 tables defined in `src/db/schema.ts`:
-- `accounts` — financial accounts with institution, currency, owner
+- `accounts` — financial accounts with type, institution (nullable — only for transaction accounts), currency, owner
 - `transactions` — imported transactions with category, event, excluded, isRecurring flags
 - `exchange_rates` — cached daily currency rates (unique on date+pair)
 - `manual_income_entries` — recurring income with start month + monthly amount
@@ -164,6 +171,7 @@ src/
 - `categories` — category definitions (unused, reserved for future)
 - `goals` — financial goals (budget_cap, savings_target, savings_amount) with scope, owner, period
 - `goal_achievements` — per-period achievement records for streak/history tracking (unique on goalId+period)
+- `app_config` — single-row app configuration (e.g., `allStartDate` override for dashboard "All" button)
 
 DB connection is lazy-initialized via Proxy in `src/db/index.ts` to avoid build-time errors.
 
@@ -219,19 +227,27 @@ AUTH_PASSWORD=...           # Single password for login
 - Transactions page reads URL query params on mount (`category`, `startDate`, `endDate`) to support drill-down from dashboard
 
 ### Goals & Gamification
-- Three goal types: `budget_cap` (spend under $X), `savings_target` (save X% of income), `savings_amount` (save $X)
+- **Annual-only goals** — all goals are defined as annual targets; monthly tracking is derived automatically
+- Three goal types: `budget_cap` (spend under $X/yr), `savings_target` (save X% of income), `savings_amount` (save $X/yr)
+- Monthly targets derived: budget_cap and savings_amount use `targetAmount / 12`, savings_target (%) stays the same
 - Scope: overall or category-specific (e.g. budget cap on "Restaurants & Cafes"), optional owner filter
-- Period: monthly or annual
 - Progress computed live from transactions (same queries as dashboard), not stored — only achievements are persisted
 - Achievements stored in `goal_achievements` table for streak persistence (unique on goalId+period)
-- "Evaluate" button processes last 6 months, recording pass/fail for each period
+- Both monthly ("2025-09") and annual ("2025") achievements are evaluated and stored
+- **Auto-evaluation**: achievements are evaluated automatically (no manual button) — triggered by: stale check on page load (once/month), goal creation, goal target edit, transaction import
+- Shared evaluation logic in `src/lib/evaluate-goals.ts` — used by goals GET (stale check), goals POST/PUT, transactions POST, and evaluate API route
+- Monthly evaluation uses derived target (/12); annual evaluation uses full annual target
+- Streaks count consecutive **monthly** achievements (not annual)
 - Celebrations: canvas-confetti on achievements + streak milestones (3, 6, 12 months)
 - Gamification: streak counters, report card grade (A/B/C/D based on achievement ratio), owner leaderboard
 - Status thresholds: `achieved` (>=100% of target), `on_track` (>=95%), `at_risk` (>=70%), `exceeded`/`missed` (<70%)
 - Drag-and-drop reordering of active goals via @dnd-kit (sortOrder column, PATCH `/api/goals/reorder`)
 - Currency display: ILS goals show ₪, USD goals show $
+- Achievement history table shows both monthly columns and annual columns (separated by border)
 
 ## Important Notes
+
+- **Never tell the user to run commands** — always execute them directly (builds, schema pushes, installs, etc.)
 
 - Drizzle `eq()` on enum columns requires exact type — use `sql` template for dynamic string values (see `chat/tools.ts` income source filter)
 - OpenAI SDK `ChatCompletionMessageToolCall` is a union type — filter with `tc.type === "function"` before accessing `tc.function`
@@ -244,7 +260,7 @@ AUTH_PASSWORD=...           # Single password for login
 - Pepper parser requires `pdftotext` system binary (poppler) — not available on Vercel serverless
 - Net worth recording skips credit card accounts (assumed paid in full monthly)
 - Dashboard YTD default end date is last day of previous month
-- After adding/changing DB tables, run `npx drizzle-kit push` to sync schema to Neon
+- After adding/changing DB tables, always run `npx drizzle-kit push` to sync schema to Neon — never tell the user to run commands, always execute them directly
 - `AUTH_SECRET` and `CRON_SECRET` are auto-derived from `DATABASE_URL` via HMAC if env vars not set (`src/lib/auth-utils.ts`)
 - Build script runs `drizzle-kit push` before `next build` — tables auto-created on first deploy
 - Deploy button in README uses Vercel's Neon integration for auto-provisioning

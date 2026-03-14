@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions, exclusionRules, merchantCategories, importLogs } from "@/db/schema";
 import { eq, and, sql, desc, asc } from "drizzle-orm";
+import { evaluateGoals } from "@/lib/evaluate-goals";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -143,6 +144,11 @@ export async function POST(request: NextRequest) {
     importedRows: items.length - skipped,
     duplicateRows: skipped,
   });
+
+  // Re-evaluate goals in background (new transactions may change achievements)
+  if (newItems.length > 0) {
+    evaluateGoals().catch(() => {});
+  }
 
   return NextResponse.json({
     imported: newItems.length,

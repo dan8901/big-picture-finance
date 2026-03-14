@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, manualIncomeEntries, accounts, events } from "@/db/schema";
-import { sql, and, eq } from "drizzle-orm";
+import { transactions, manualIncomeEntries, accounts, events, appConfig } from "@/db/schema";
+import { sql, and, eq, inArray } from "drizzle-orm";
 import { getExchangeRatesForDates } from "@/lib/exchange";
+import { TRANSACTION_ACCOUNT_TYPES } from "@/lib/accounts";
 
 const DISPLAY_CURRENCY = "USD";
 
@@ -417,7 +418,41 @@ export async function GET(request: NextRequest) {
       usdFromILS: data.usdFromILS,
     }));
 
+  // Find the date when all transaction accounts have data (max of each account's min date)
+  const txAccountIds = accts
+    .filter((a) => (TRANSACTION_ACCOUNT_TYPES as readonly string[]).includes(a.type))
+    .map((a) => a.id);
+  const perAccountEarliest = txAccountIds.length > 0
+    ? await db
+        .select({
+          accountId: transactions.accountId,
+          earliest: sql<string>`min(${transactions.date})`,
+        })
+        .from(transactions)
+        .where(and(
+          eq(transactions.excluded, 0),
+          inArray(transactions.accountId, txAccountIds)
+        ))
+        .groupBy(transactions.accountId)
+    : [];
+  const earliestDate = perAccountEarliest.length > 0
+    ? perAccountEarliest.reduce((earliest, a) => a.earliest < earliest ? a.earliest : earliest, perAccountEarliest[0].earliest)
+    : null;
+  const allDataStartDateRaw = perAccountEarliest.length > 1
+    ? perAccountEarliest.reduce((latest, a) => a.earliest > latest ? a.earliest : latest, perAccountEarliest[0].earliest)
+    : null;
+  const allDataStartDate = allDataStartDateRaw
+    ? allDataStartDateRaw.substring(0, 7) + "-01"
+    : null;
+
+  // Check for user override
+  const configRows = await db.select().from(appConfig);
+  const allStartDateOverride = configRows[0]?.allStartDate ?? null;
+
   return NextResponse.json({
+    earliestDate,
+    allStartDateOverride,
+    allDataStartDate,
     totalIncome,
     totalExpenses,
     totalSaved,

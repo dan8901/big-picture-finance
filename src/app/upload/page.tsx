@@ -31,6 +31,7 @@ import { toast } from "sonner";
 interface Account {
   id: number;
   name: string;
+  type: string;
   institution: string;
   currency: string;
   owner: string;
@@ -268,7 +269,7 @@ export default function UploadPage() {
                 <SelectValue placeholder="Select an account" />
               </SelectTrigger>
               <SelectContent>
-                {accounts.map((account) => (
+                {accounts.filter((a) => a.type === "bank" || a.type === "credit_card").map((account) => (
                   <SelectItem key={account.id} value={String(account.id)}>
                     {account.name} ({account.owner})
                   </SelectItem>

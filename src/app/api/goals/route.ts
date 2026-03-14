@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { sql, eq, and, desc } from "drizzle-orm";
 import { getExchangeRatesForDates } from "@/lib/exchange";
+import { evaluateGoals } from "@/lib/evaluate-goals";
 
 // Convert transaction amounts to the goal's currency.
 // Only ILS→USD rates are stored in the DB, so for USD→ILS we fetch ILS→USD and invert.
@@ -261,23 +262,24 @@ async function computeSavingsAmount(
   };
 }
 
-function getPeriodDates(period: string, referenceDate?: Date) {
+function getPeriodDates(referenceDate?: Date) {
   const now = referenceDate ?? new Date();
-  if (period === "monthly") {
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
-    const start = `${year}-${String(month).padStart(2, "0")}-01`;
-    const lastDay = new Date(year, month, 0).getDate();
-    const end = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-    return { start, end, label: `${year}-${String(month).padStart(2, "0")}` };
-  } else {
-    const year = now.getFullYear();
-    return { start: `${year}-01-01`, end: `${year}-12-31`, label: `${year}` };
-  }
+  const year = now.getFullYear();
+  return { start: `${year}-01-01`, end: `${year}-12-31`, label: `${year}` };
 }
 
-function getPeriodDatesFromLabel(label: string, period: string) {
-  if (period === "monthly") {
+function getMonthPeriodDates(referenceDate?: Date) {
+  const now = referenceDate ?? new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const start = `${year}-${String(month).padStart(2, "0")}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const end = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { start, end, label: `${year}-${String(month).padStart(2, "0")}` };
+}
+
+function getPeriodDatesFromLabel(label: string) {
+  if (label.includes("-")) {
     const [year, month] = label.split("-").map(Number);
     const start = `${year}-${String(month).padStart(2, "0")}-01`;
     const lastDay = new Date(year, month, 0).getDate();
@@ -294,6 +296,21 @@ export async function GET() {
     .from(goals)
     .orderBy(goals.sortOrder, desc(goals.createdAt));
 
+  // Auto-evaluate if stale: check if last monthly achievement covers last completed month
+  const now = new Date();
+  const lastCompletedMonth = `${now.getFullYear()}-${String(now.getMonth()).padStart(2, "0")}`;
+  // getMonth() is 0-based, so getMonth() for March = 2, which gives "02" = February — exactly last completed month
+  if (lastCompletedMonth >= "2024-01") {
+    const [latestAchievement] = await db
+      .select({ maxPeriod: sql<string>`MAX(${goalAchievements.period})` })
+      .from(goalAchievements)
+      .where(sql`${goalAchievements.period} LIKE '____-__'`);
+    const maxPeriod = latestAchievement?.maxPeriod;
+    if (!maxPeriod || maxPeriod < lastCompletedMonth) {
+      await evaluateGoals();
+    }
+  }
+
   // Get the date of the last available transaction for pace calculation (budget goals)
   const [lastTxResult] = await db
     .select({ maxDate: sql<string>`MAX(${transactions.date})` })
@@ -308,25 +325,23 @@ export async function GET() {
   const results = [];
 
   for (const goal of allGoals) {
-    const { start, end, label } = getPeriodDates(goal.period);
+    const { start, end, label } = getPeriodDates();
+    const target = parseFloat(goal.targetAmount);
+
+    // Derive monthly target: /12 for amount-based, same for percentage
+    const monthlyTarget = goal.type === "savings_target" ? target : target / 12;
 
     let currentAmount = 0;
     let progress = 0;
     let status: "on_track" | "at_risk" | "exceeded" | "achieved" = "on_track";
 
-    // For annual goals, compute pace fraction
-    // Budget goals: based on last transaction date (real-time)
-    // Savings goals: based on end of previous month (their data cap)
+    // Compute pace fraction for annual progress
     const paceDate = goal.type === "budget_cap" ? lastTxDate : endOfPrevMonth;
-    const paceFraction = goal.period === "annual"
-      ? Math.min((paceDate.getMonth() + 1) / 12, 1)
-      : 1;
+    const paceFraction = Math.min((paceDate.getMonth() + 1) / 12, 1);
 
     if (goal.type === "budget_cap") {
       currentAmount = await computeBudgetAmount(goal, start, end);
-      const target = parseFloat(goal.targetAmount);
       progress = target > 0 ? (currentAmount / target) * 100 : 0;
-      // For budget caps, compare spending against pace-adjusted budget
       const paceProgress = paceFraction > 0 ? progress / paceFraction : progress;
 
       if (progress >= 100) status = "exceeded";
@@ -335,9 +350,7 @@ export async function GET() {
     } else if (goal.type === "savings_amount") {
       const result = await computeSavingsAmount(goal, start, end);
       currentAmount = result.income - result.expenses;
-      const target = parseFloat(goal.targetAmount);
       progress = target > 0 ? (currentAmount / target) * 100 : 0;
-      // Compare savings against pace-adjusted target
       const paceProgress = paceFraction > 0 ? progress / paceFraction : progress;
 
       if (currentAmount >= target) status = "achieved";
@@ -345,10 +358,9 @@ export async function GET() {
       else if (paceProgress >= 70) status = "at_risk";
       else status = "exceeded";
     } else {
-      // savings_target (percentage) — not pace-dependent, rate is rate
+      // savings_target (percentage) — not pace-dependent
       const result = await computeSavingsAmount(goal, start, end);
       currentAmount = result.savings;
-      const target = parseFloat(goal.targetAmount);
       progress = target > 0 ? (currentAmount / target) * 100 : 0;
 
       if (currentAmount >= target) status = "achieved";
@@ -364,17 +376,31 @@ export async function GET() {
       .where(eq(goalAchievements.goalId, goal.id))
       .orderBy(desc(goalAchievements.period));
 
-    // Compute streak: consecutive achieved periods from most recent
+    // Split into monthly and annual achievements
+    const monthlyAchievements = achievements.filter((a) => a.period.includes("-"));
+    const annualAchievements = achievements.filter((a) => !a.period.includes("-"));
+
+    // Streak based on monthly achievements (consecutive months hitting derived target)
     let streak = 0;
-    const sortedAchievements = [...achievements].sort((a, b) =>
-      b.period.localeCompare(a.period)
-    );
-    for (const a of sortedAchievements) {
+    for (const a of monthlyAchievements) {
       if (a.achieved === 1) streak++;
       else break;
     }
 
-    const history = achievements.slice(0, 6).map((a) => ({
+    const monthlyHistory = monthlyAchievements.slice(0, 12).map((a) => ({
+      period: a.period,
+      achieved: a.achieved === 1,
+      actualAmount: parseFloat(a.actualAmount),
+    }));
+
+    const annualHistory = annualAchievements.slice(0, 6).map((a) => ({
+      period: a.period,
+      achieved: a.achieved === 1,
+      actualAmount: parseFloat(a.actualAmount),
+    }));
+
+    // Combined history for backward compat (sparklines etc.)
+    const history = monthlyAchievements.slice(0, 6).map((a) => ({
       period: a.period,
       achieved: a.achieved === 1,
       actualAmount: parseFloat(a.actualAmount),
@@ -383,12 +409,15 @@ export async function GET() {
     results.push({
       ...goal,
       targetAmount: parseFloat(goal.targetAmount),
+      monthlyTarget: Math.round(monthlyTarget * 100) / 100,
       currentAmount: Math.round(currentAmount * 100) / 100,
       currentPeriod: label,
       progress: Math.round(progress * 10) / 10,
       status,
       streak,
       history,
+      monthlyHistory,
+      annualHistory,
     });
   }
 
@@ -397,7 +426,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, type, scope, category, owner, targetAmount, currency, period } =
+  const { name, type, scope, category, owner, targetAmount, currency } =
     body;
 
   const [maxResult] = await db
@@ -415,10 +444,13 @@ export async function POST(request: NextRequest) {
       owner: owner || null,
       targetAmount: String(targetAmount),
       currency,
-      period,
+      period: "annual",
       sortOrder: nextOrder,
     })
     .returning();
+
+  // Auto-evaluate the new goal to populate its achievement history
+  evaluateGoals(undefined, [created.id]).catch(() => {});
 
   return NextResponse.json(created, { status: 201 });
 }
@@ -427,11 +459,17 @@ export async function PUT(request: NextRequest) {
   const body = await request.json();
   const { id, ...updates } = body;
 
-  if (updates.targetAmount !== undefined) {
+  const hasTargetChange = updates.targetAmount !== undefined;
+  if (hasTargetChange) {
     updates.targetAmount = String(updates.targetAmount);
   }
 
   await db.update(goals).set(updates).where(eq(goals.id, id));
+
+  // Re-evaluate if target changed (past achievements may flip)
+  if (hasTargetChange) {
+    evaluateGoals(undefined, [id]).catch(() => {});
+  }
 
   return NextResponse.json({ ok: true });
 }

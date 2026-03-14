@@ -207,11 +207,6 @@ export const toolDefinitions: ChatCompletionTool[] = [
           },
           category: { type: "string", description: "Filter by category (e.g. 'Food & Groceries')" },
           owner: { type: "string", description: "Filter by owner" },
-          period: {
-            type: "string",
-            enum: ["monthly", "annual"],
-            description: "Filter by goal period",
-          },
           activeOnly: {
             type: "boolean",
             description: "Only return active goals (default true)",
@@ -1101,13 +1096,11 @@ async function getGoals(params: ToolParams) {
     type,
     category,
     owner,
-    period,
     activeOnly = true,
   } = params as {
     type?: string;
     category?: string;
     owner?: string;
-    period?: string;
     activeOnly?: boolean;
   };
 
@@ -1116,7 +1109,6 @@ async function getGoals(params: ToolParams) {
   if (type) conditions.push(sql`${goals.type} = ${type}`);
   if (category) conditions.push(sql`lower(${goals.category}) = ${category.toLowerCase()}`);
   if (owner) conditions.push(sql`lower(${goals.owner}) = ${owner.toLowerCase()}`);
-  if (period) conditions.push(sql`${goals.period} = ${period}`);
 
   const allGoals = await db
     .select()
@@ -1146,6 +1138,9 @@ async function getGoals(params: ToolParams) {
       actualAmount: parseFloat(a.actualAmount),
     }));
 
+    const targetAmt = parseFloat(goal.targetAmount);
+    const monthlyTarget = goal.type === "savings_target" ? targetAmt : targetAmt / 12;
+
     results.push({
       id: goal.id,
       name: goal.name,
@@ -1153,9 +1148,9 @@ async function getGoals(params: ToolParams) {
       scope: goal.scope,
       category: goal.category,
       owner: goal.owner,
-      targetAmount: parseFloat(goal.targetAmount),
+      targetAmount: targetAmt,
+      monthlyTarget: Math.round(monthlyTarget * 100) / 100,
       currency: goal.currency,
-      period: goal.period,
       isActive: goal.isActive === 1,
       streak,
       recentHistory,

@@ -7,9 +7,6 @@ import { sdfcuParser } from "./sdfcu";
 import { fidelityParser } from "./fidelity";
 import { bankHapoalimParser } from "./bank-hapoalim";
 import { pepperParser } from "./pepper";
-import { interactiveBrokersParser } from "./interactive-brokers";
-import { meitavParser } from "./meitav";
-import { harelParser } from "./harel";
 
 export const parsers: Record<string, Parser> = {
   isracard: isracardParser,
@@ -20,9 +17,6 @@ export const parsers: Record<string, Parser> = {
   fidelity: fidelityParser,
   "bank-hapoalim": bankHapoalimParser,
   pepper: pepperParser,
-  "interactive-brokers": interactiveBrokersParser,
-  meitav: meitavParser,
-  harel: harelParser,
 };
 
 export function getParser(institution: string): Parser | undefined {
