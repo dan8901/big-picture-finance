@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Big Picture Finance",
+    default: "Dashboard | Big Picture Finance",
     template: "%s | Big Picture Finance",
   },
   description: "Annual financial overview for your household",

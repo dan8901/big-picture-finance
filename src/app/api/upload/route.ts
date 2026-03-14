@@ -24,6 +24,17 @@ export async function POST(request: NextRequest) {
   const allTransactions = [];
 
   for (const file of files) {
+    // Validate file format against parser's supported formats
+    const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const normalizedExt = ext === "xls" ? "xlsx" : ext;
+    if (!parser.supportedFormats.includes(normalizedExt as "csv" | "xlsx" | "pdf")) {
+      const accepted = parser.supportedFormats.map((f) => f.toUpperCase()).join(", ");
+      return NextResponse.json(
+        { error: `"${file.name}" is not supported by the ${parser.name} parser. Accepted formats: ${accepted}` },
+        { status: 400 }
+      );
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
     try {
       const transactions = await parser.parse(buffer, file.name);

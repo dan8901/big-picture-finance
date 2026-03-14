@@ -431,7 +431,7 @@ function TransactionsContent() {
   }
 
   function exportCSV() {
-    const headers = ["Date", "Description", "Amount", "Currency", "Category", "Account", "Event"];
+    const headers = ["Date", "Description", "Amount", "Currency", "Category", "Account", "Owner", "Event"];
     const rows = sorted.map((tx) => [
       tx.date,
       `"${tx.description.replace(/"/g, '""')}"`,
@@ -439,6 +439,7 @@ function TransactionsContent() {
       tx.currency,
       tx.category ?? "",
       accountName(tx.accountId),
+      accountOwner(tx.accountId),
       eventName(tx.eventId) ?? "",
     ]);
     const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
@@ -844,6 +845,7 @@ function TransactionsContent() {
                     </TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Account</TableHead>
+                    <TableHead>Owner</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Event</TableHead>
                     <TableHead
@@ -893,6 +895,9 @@ function TransactionsContent() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {accountName(tx.accountId)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {accountOwner(tx.accountId)}
                       </TableCell>
                       <TableCell>
                         {editingCategoryId === tx.id ? (

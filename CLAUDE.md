@@ -43,6 +43,7 @@ src/
 │       ├── goals/route.ts          # CRUD + progress computation for goals
 │       ├── goals/evaluate/route.ts # Evaluate goals for past periods, record achievements
 │       ├── goals/reorder/route.ts  # PATCH: persist drag-and-drop goal ordering
+│       ├── cron/sync-rates/route.ts # Vercel cron: daily exchange rate sync
 │       └── import-history/route.ts # GET: recent import logs with account names
 ├── components/
 │   ├── sidebar.tsx                 # Nav sidebar with SVG icons, collapsible, sync rates button
@@ -183,6 +184,9 @@ DATABASE_URL=postgresql://...@...neon.tech/neondb?sslmode=require
 NVIDIA_API_KEY=...          # For AI categorization + chatbot (NVIDIA-hosted Claude)
 NVIDIA_BASE_URL=https://inference-api.nvidia.com/v1
 NVIDIA_MODEL=aws/anthropic/bedrock-claude-opus-4-6
+AUTH_SECRET=...             # HMAC secret for signing auth cookies (openssl rand -hex 32)
+AUTH_PASSWORD=...           # Single password for login
+CRON_SECRET=...             # Protects the daily exchange rate sync cron endpoint
 ```
 
 ### Dashboard Features

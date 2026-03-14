@@ -64,6 +64,7 @@ export default function UploadPage() {
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importHistory, setImportHistory] = useState<any[]>([]);
+  const [parserFormats, setParserFormats] = useState<Record<string, string[]>>({});
 
   const fetchAccounts = useCallback(async () => {
     const res = await fetch("/api/accounts");
@@ -76,14 +77,27 @@ export default function UploadPage() {
     if (res.ok) setImportHistory(await res.json());
   }, []);
 
+  const fetchFormats = useCallback(async () => {
+    const res = await fetch("/api/upload/formats");
+    if (res.ok) setParserFormats(await res.json());
+  }, []);
+
   useEffect(() => {
     fetchAccounts();
     fetchHistory();
-  }, [fetchAccounts, fetchHistory]);
+    fetchFormats();
+  }, [fetchAccounts, fetchHistory, fetchFormats]);
 
   const selectedAccount = accounts.find(
     (a) => a.id === parseInt(selectedAccountId)
   );
+
+  const acceptedFormats = selectedAccount
+    ? parserFormats[selectedAccount.institution] ?? []
+    : [];
+  const acceptExtensions = acceptedFormats.length > 0
+    ? acceptedFormats.flatMap((f) => f === "xlsx" ? [".xlsx", ".xls"] : [`.${f}`]).join(",")
+    : ".csv,.xlsx,.xls,.pdf";
 
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
@@ -98,13 +112,35 @@ export default function UploadPage() {
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setIsDragging(false);
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    setFiles((prev) => [...prev, ...droppedFiles]);
+    const valid = validateFileFormats(Array.from(e.dataTransfer.files));
+    if (valid.length > 0) setFiles((prev) => [...prev, ...valid]);
+  }
+
+  function validateFileFormats(newFiles: File[]): File[] {
+    if (acceptedFormats.length === 0) return newFiles;
+    const valid: File[] = [];
+    const rejected: string[] = [];
+    for (const f of newFiles) {
+      const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
+      const normalized = ext === "xls" ? "xlsx" : ext;
+      if (acceptedFormats.includes(normalized)) {
+        valid.push(f);
+      } else {
+        rejected.push(f.name);
+      }
+    }
+    if (rejected.length > 0) {
+      toast.error(
+        `${rejected.join(", ")} not supported. Accepted: ${acceptedFormats.map((f) => f.toUpperCase()).join(", ")}`
+      );
+    }
+    return valid;
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files) {
-      setFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+      const valid = validateFileFormats(Array.from(e.target.files));
+      if (valid.length > 0) setFiles((prev) => [...prev, ...valid]);
     }
   }
 
@@ -249,8 +285,9 @@ export default function UploadPage() {
           <CardHeader>
             <CardTitle>2. Upload Files</CardTitle>
             <CardDescription>
-              Drop one or more files (CSV, XLSX, PDF). Multiple monthly reports
-              will be merged.
+              {acceptedFormats.length > 0
+                ? `Drop one or more ${acceptedFormats.map((f) => f.toUpperCase()).join("/")} files. Multiple monthly reports will be merged.`
+                : "Drop one or more files. Multiple monthly reports will be merged."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -269,13 +306,15 @@ export default function UploadPage() {
                 Drag & drop files here, or click to browse
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Supports CSV, XLSX, and PDF
+                {acceptedFormats.length > 0
+                  ? `Accepts: ${acceptedFormats.map((f) => f.toUpperCase()).join(", ")}`
+                  : "Supports CSV, XLSX, and PDF"}
               </p>
               <input
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".csv,.xlsx,.xls,.pdf"
+                accept={acceptExtensions}
                 onChange={handleFileSelect}
                 className="hidden"
               />
