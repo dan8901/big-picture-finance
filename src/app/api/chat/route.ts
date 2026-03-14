@@ -1,14 +1,9 @@
 import { NextRequest } from "next/server";
-import OpenAI from "openai";
 import { toolDefinitions, executeTool } from "./tools";
 import { db } from "@/db";
 import { chatSessions } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import type {
-  ChatCompletionMessageParam,
-  ChatCompletionToolMessageParam,
-  ChatCompletionMessageFunctionToolCall,
-} from "openai/resources/chat/completions";
+import { getLLMClient, addToolResult, type LLMMessage, type LLMToolDefinition } from "@/lib/llm";
 
 const SYSTEM_PROMPT = `You are a helpful financial assistant for a dual-country (US/Israel) household. You have access to tools that query the household's financial database.
 
@@ -51,34 +46,31 @@ function estimateChars(messages: Array<{ role: string; content: string }>): numb
 }
 
 async function generateSummary(
-  client: OpenAI,
-  model: string,
   messages: Array<{ role: string; content: string }>
 ): Promise<string> {
   const conversation = messages
     .map((m) => `${m.role}: ${m.content}`)
     .join("\n\n");
 
-  const response = await client.chat.completions.create({
-    model,
-    max_tokens: 1024,
+  const llm = await getLLMClient("chat");
+  const response = await llm.complete({
     messages: [
       {
         role: "user",
         content: `Summarize this financial conversation concisely. Capture key questions asked, data discussed, numbers mentioned, conclusions reached, and any ongoing topics. This summary will be used as context for continuing the conversation.\n\n${conversation}`,
       },
     ],
+    maxTokens: 1024,
+    feature: "chat",
   });
 
-  return response.choices[0]?.message?.content ?? "Previous conversation context unavailable.";
+  return response.content ?? "Previous conversation context unavailable.";
 }
 
 async function trimMessages(
-  client: OpenAI,
-  model: string,
   messages: Array<{ role: string; content: string }>,
   sessionId: number | null
-): Promise<ChatCompletionMessageParam[]> {
+): Promise<LLMMessage[]> {
   const totalChars = estimateChars(messages) + SYSTEM_PROMPT.length;
 
   // Under limit — send everything as-is
@@ -93,7 +85,6 @@ async function trimMessages(
   }
 
   // Over limit — need to summarize older messages
-  // Find how many recent messages to keep (up to RECENT_PAIRS_TO_KEEP pairs = 20 messages)
   const recentCount = Math.min(messages.length, RECENT_PAIRS_TO_KEEP * 2);
   const olderMessages = messages.slice(0, messages.length - recentCount);
   const recentMessages = messages.slice(messages.length - recentCount);
@@ -110,7 +101,7 @@ async function trimMessages(
 
   // Generate summary if we don't have a cached one or older messages have grown
   if (!summary && olderMessages.length > 0) {
-    summary = await generateSummary(client, model, olderMessages);
+    summary = await generateSummary(olderMessages);
 
     // Cache it
     if (sessionId) {
@@ -121,7 +112,7 @@ async function trimMessages(
     }
   }
 
-  const result: ChatCompletionMessageParam[] = [
+  const result: LLMMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
   ];
 
@@ -156,78 +147,65 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const client = new OpenAI({
-    apiKey: process.env.NVIDIA_API_KEY,
-    baseURL: process.env.NVIDIA_BASE_URL,
-  });
-
-  const model = process.env.NVIDIA_MODEL ?? "aws/anthropic/bedrock-claude-opus-4-6";
-
   // Build message history with optional summarization for long conversations
-  const apiMessages = await trimMessages(client, model, messages, sessionId ?? null);
+  let apiMessages = await trimMessages(messages, sessionId ?? null);
+
+  // Convert tool definitions to LLM format
+  const llmToolDefs: LLMToolDefinition[] = toolDefinitions
+    .filter((t): t is Extract<typeof t, { type: "function" }> => t.type === "function")
+    .map((t) => ({
+      type: "function" as const,
+      function: {
+        name: t.function.name,
+        description: t.function.description ?? "",
+        parameters: t.function.parameters as Record<string, unknown>,
+      },
+    }));
 
   // Create a streaming response
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        const llm = await getLLMClient("chat");
         let round = 0;
 
         while (round < MAX_TOOL_ROUNDS) {
           round++;
 
-          const response = await client.chat.completions.create({
-            model,
-            max_tokens: 4096,
+          const response = await llm.complete({
             messages: apiMessages,
-            tools: toolDefinitions,
+            tools: llmToolDefs,
+            maxTokens: 4096,
+            feature: "chat",
           });
 
-          const choice = response.choices[0];
-          if (!choice) break;
-
-          const message = choice.message;
-
-          // If the model wants to call tools
-          const fnCalls = (message.tool_calls ?? []).filter(
-            (tc): tc is ChatCompletionMessageFunctionToolCall => tc.type === "function"
-          );
-
-          if (fnCalls.length > 0) {
+          if (response.toolCalls.length > 0) {
             // Send status to client
-            const toolNames = fnCalls.map((tc) => tc.function.name).join(", ");
+            const toolNames = response.toolCalls.map((tc) => tc.name).join(", ");
             controller.enqueue(
               encoder.encode(sseEvent("status", { text: `Querying: ${toolNames}...` }))
             );
 
-            // Add assistant message with tool calls
-            apiMessages.push({
-              role: "assistant",
-              content: message.content ?? "",
-              tool_calls: fnCalls,
-            });
-
             // Execute each tool call
-            const toolResults: ChatCompletionToolMessageParam[] = [];
-            for (const toolCall of fnCalls) {
+            const toolResults: Array<{ toolCallId: string; content: string }> = [];
+            for (const toolCall of response.toolCalls) {
               let args: Record<string, unknown> = {};
               try {
-                args = JSON.parse(toolCall.function.arguments);
+                args = JSON.parse(toolCall.arguments);
               } catch {
                 // empty args
               }
 
               try {
-                const result = await executeTool(toolCall.function.name, args);
+                const result = await executeTool(toolCall.name, args);
                 toolResults.push({
-                  role: "tool",
-                  tool_call_id: toolCall.id,
+                  toolCallId: toolCall.id,
                   content: JSON.stringify(result),
                 });
               } catch (err) {
                 toolResults.push({
-                  role: "tool",
-                  tool_call_id: toolCall.id,
+                  toolCallId: toolCall.id,
                   content: JSON.stringify({
                     error: `Tool execution failed: ${err instanceof Error ? err.message : "unknown error"}`,
                   }),
@@ -235,14 +213,14 @@ export async function POST(request: NextRequest) {
               }
             }
 
-            apiMessages.push(...toolResults);
+            apiMessages = addToolResult(apiMessages, response.content, response.toolCalls, toolResults);
             continue; // Loop for another round
           }
 
           // No tool calls — stream the final text response
-          if (message.content) {
+          if (response.content) {
             controller.enqueue(
-              encoder.encode(sseEvent("delta", { text: message.content }))
+              encoder.encode(sseEvent("delta", { text: response.content }))
             );
           }
           break;

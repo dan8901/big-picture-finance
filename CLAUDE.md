@@ -27,6 +27,7 @@ src/
 │   ├── excluded/page.tsx           # View and manage excluded transactions
 │   ├── chat/page.tsx               # AI chatbot — ask natural language questions about finances
 │   ├── goals/page.tsx              # Goals — budget caps, savings targets, streaks, gamification
+│   ├── settings/page.tsx           # LLM provider config + API usage/cost tracking
 │   └── api/
 │       ├── dashboard/route.ts      # Analytics: totals, breakdowns, trends, events, top txns
 │       ├── transactions/route.ts   # GET (filtered), POST (bulk import w/ dedup + logging), DELETE
@@ -43,6 +44,7 @@ src/
 │       ├── goals/route.ts          # CRUD + progress computation for goals
 │       ├── goals/evaluate/route.ts # Evaluate goals for past periods, record achievements
 │       ├── goals/reorder/route.ts  # PATCH: persist drag-and-drop goal ordering
+│       ├── settings/route.ts       # GET (read config) / PUT (save config) / POST (test connection)
 │       ├── cron/sync-rates/route.ts # Vercel cron: daily exchange rate sync
 │       └── import-history/route.ts # GET: recent import logs with account names
 ├── components/
@@ -54,6 +56,8 @@ src/
 └── lib/
     ├── utils.ts                    # cn() helper
     ├── exchange.ts                 # Exchange rate DB cache reader
+    ├── llm.ts                      # Unified LLM abstraction (OpenAI + Anthropic clients)
+    ├── llm-presets.ts              # Provider presets, model lists, cost estimation
     └── parsers/
         ├── types.ts                # ParsedTransaction, Parser interfaces
         ├── index.ts                # Parser registry (getParser, listParsers)
@@ -142,7 +146,7 @@ src/
 
 ## Database
 
-12 tables defined in `src/db/schema.ts`:
+14 tables defined in `src/db/schema.ts`:
 - `accounts` — financial accounts with institution, currency, owner
 - `transactions` — imported transactions with category, event, excluded, isRecurring flags
 - `exchange_rates` — cached daily currency rates (unique on date+pair)
@@ -152,6 +156,8 @@ src/
 - `exclusion_rules` — account+description pairs to auto-exclude on import
 - `merchant_categories` — merchant→category mappings (AI + user overrides)
 - `import_logs` — audit log of file imports (account, filename, parser, row counts, timestamp)
+- `llm_config` — LLM provider configuration (single-row, provider/apiKey/baseUrl/model)
+- `llm_usage_logs` — per-request token usage and estimated cost tracking (feature, model, tokens, cost)
 - `categories` — category definitions (unused, reserved for future)
 - `goals` — financial goals (budget_cap, savings_target, savings_amount) with scope, owner, period
 - `goal_achievements` — per-period achievement records for streak/history tracking (unique on goalId+period)
@@ -174,16 +180,23 @@ npx drizzle-kit push # Push schema changes to Neon DB
 - Tools handle ILS→USD conversion internally via `getExchangeRatesForDates()`
 - Row results capped at 20-50 per tool call to prevent token overflow
 - Conversation history stored in client React state only (ephemeral, not persisted)
-- Same NVIDIA-hosted LLM endpoint as categorization (env vars: `NVIDIA_API_KEY`, `NVIDIA_BASE_URL`, `NVIDIA_MODEL`)
+- Uses shared LLM abstraction (`src/lib/llm.ts`) — supports OpenAI-compatible providers + native Anthropic API
 - Frontend parses SSE with `response.body.getReader()` — no external SSE library needed
+
+### LLM Configuration
+- Provider config stored in `llm_config` table (single row, UI-configurable at `/settings`)
+- Supports: OpenAI, Anthropic (native SDK), NVIDIA, DeepSeek, OpenRouter, Custom (any OpenAI-compatible)
+- `src/lib/llm.ts` provides `getLLMClient()` factory — used by both `categorize` and `chat` routes
+- `addToolResult()` helper builds tool-result messages in the unified format
+- Config cached in-memory for 60s to avoid DB query per LLM call; `clearConfigCache()` invalidates on save
+- Token usage logged to `llm_usage_logs` table after every LLM call; cost estimated from model pricing map in `llm-presets.ts`
+- Anthropic client handles message format conversion (system→param, tool results→user content blocks, role alternation)
+- Settings API: `GET /api/settings` (masked config + usage stats), `PUT` (save), `POST ?action=test` (connection test)
 
 ## Environment Variables (.env.local)
 
 ```
 DATABASE_URL=postgresql://...@...neon.tech/neondb?sslmode=require
-NVIDIA_API_KEY=...          # For AI categorization + chatbot (NVIDIA-hosted Claude)
-NVIDIA_BASE_URL=https://inference-api.nvidia.com/v1
-NVIDIA_MODEL=aws/anthropic/bedrock-claude-opus-4-6
 AUTH_SECRET=...             # HMAC secret for signing auth cookies (openssl rand -hex 32)
 AUTH_PASSWORD=...           # Single password for login
 CRON_SECRET=...             # Protects the daily exchange rate sync cron endpoint

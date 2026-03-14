@@ -175,6 +175,27 @@ export const goalAchievements = pgTable(
   ]
 );
 
+export const llmConfig = pgTable("llm_config", {
+  id: serial("id").primaryKey(),
+  provider: text("provider", {
+    enum: ["openai", "anthropic", "nvidia", "deepseek", "openrouter", "ollama", "groq", "together", "fireworks", "mistral", "perplexity", "google", "cohere", "azure", "aws-bedrock", "lmstudio", "custom"],
+  }).notNull(),
+  apiKey: text("api_key").notNull(),
+  baseUrl: text("base_url"),
+  model: text("model").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const llmUsageLogs = pgTable("llm_usage_logs", {
+  id: serial("id").primaryKey(),
+  feature: text("feature", { enum: ["chat", "categorize"] }).notNull(),
+  model: text("model").notNull(),
+  inputTokens: integer("input_tokens").notNull(),
+  outputTokens: integer("output_tokens").notNull(),
+  estimatedCost: numeric("estimated_cost", { precision: 10, scale: 6 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const importLogs = pgTable("import_logs", {
   id: serial("id").primaryKey(),
   accountId: integer("account_id")

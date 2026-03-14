@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { transactions, merchantCategories } from "@/db/schema";
 import { eq, isNull, sql, and } from "drizzle-orm";
-import OpenAI from "openai";
+import { getLLMClient } from "@/lib/llm";
 
 const STANDARD_CATEGORIES = [
   "Food & Dining",
@@ -162,16 +162,11 @@ async function getUncategorizedDescriptions() {
 }
 
 async function categorizeBatch(descriptions: string[]) {
-  const client = new OpenAI({
-    apiKey: process.env.NVIDIA_API_KEY,
-    baseURL: process.env.NVIDIA_BASE_URL,
-  });
+  const llm = await getLLMClient("categorize");
 
   const numbered = descriptions.map((d, idx) => `${idx + 1}. ${d}`).join("\n");
 
-  const response = await client.chat.completions.create({
-    model: process.env.NVIDIA_MODEL ?? "aws/anthropic/bedrock-claude-opus-4-6",
-    max_tokens: 4096,
+  const response = await llm.complete({
     messages: [
       {
         role: "user",
@@ -186,9 +181,11 @@ Descriptions:
 ${numbered}`,
       },
     ],
+    maxTokens: 4096,
+    feature: "categorize",
   });
 
-  const text = response.choices[0]?.message?.content ?? "";
+  const text = response.content ?? "";
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     return NextResponse.json({ categorized: 0, error: "No JSON in response" });
@@ -314,18 +311,13 @@ async function categorizeWithLLM() {
   const BATCH_SIZE = 100;
   let llmCategorized = 0;
 
-  const client = new OpenAI({
-    apiKey: process.env.NVIDIA_API_KEY,
-    baseURL: process.env.NVIDIA_BASE_URL,
-  });
+  const llm = await getLLMClient("categorize");
 
   for (let i = 0; i < needsLLM.length; i += BATCH_SIZE) {
     const batch = needsLLM.slice(i, i + BATCH_SIZE);
     const numbered = batch.map((d, idx) => `${idx + 1}. ${d}`).join("\n");
 
-    const response = await client.chat.completions.create({
-      model: process.env.NVIDIA_MODEL ?? "aws/anthropic/bedrock-claude-opus-4-6",
-      max_tokens: 4096,
+    const response = await llm.complete({
       messages: [
         {
           role: "user",
@@ -340,10 +332,12 @@ Descriptions:
 ${numbered}`,
         },
       ],
+      maxTokens: 4096,
+      feature: "categorize",
     });
 
     // Parse response
-    const text = response.choices[0]?.message?.content ?? "";
+    const text = response.content ?? "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) continue;
 
