@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { APP_VERSION, REPO_URL, REPO_API_URL } from "@/lib/version";
+import { APP_VERSION, APP_VERSION_DATE, REPO_URL, REPO_API_URL } from "@/lib/version";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -43,10 +43,16 @@ function formatDate(dateStr: string) {
   });
 }
 
+function getForkUrl(): string {
+  const owner = process.env.NEXT_PUBLIC_FORK_OWNER;
+  const repo = process.env.NEXT_PUBLIC_FORK_REPO;
+  if (owner && repo) return `https://github.com/${owner}/${repo}`;
+  return REPO_URL;
+}
+
 export default function AboutPage() {
   const [checking, setChecking] = useState(false);
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
-  const [currentRelease, setCurrentRelease] = useState<ReleaseInfo | null>(null);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
@@ -55,7 +61,6 @@ export default function AboutPage() {
     setChecking(true);
     setCheckError(null);
     setRelease(null);
-    setCurrentRelease(null);
     setCommits([]);
     try {
       // Fetch latest release
@@ -74,13 +79,6 @@ export default function AboutPage() {
       }
       const latestData: ReleaseInfo = await res.json();
       setRelease(latestData);
-
-      // Fetch current version's release for its date
-      const currentRes = await fetch(`${REPO_API_URL}/releases/tags/v${APP_VERSION}`);
-      if (currentRes.ok) {
-        const currentData: ReleaseInfo = await currentRes.json();
-        setCurrentRelease(currentData);
-      }
 
       // If newer, fetch commits between the two tags
       const latestVer = latestData.tag_name.replace(/^v/, "");
@@ -120,11 +118,9 @@ export default function AboutPage() {
           <div className="flex items-center gap-4">
             <span className="text-muted-foreground">Current version:</span>
             <span className="font-mono font-semibold">v{APP_VERSION}</span>
-            {currentRelease && (
-              <span className="text-xs text-muted-foreground">
-                ({formatDate(currentRelease.published_at)})
-              </span>
-            )}
+            <span className="text-xs text-muted-foreground">
+              ({formatDate(APP_VERSION_DATE)})
+            </span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -212,14 +208,19 @@ export default function AboutPage() {
         <CardHeader>
           <CardTitle>How to Update</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>If you deployed via the &quot;Deploy with Vercel&quot; button, your repo is a fork. To update:</p>
           <ol className="list-decimal list-inside space-y-1 ml-2">
-            <li>Go to your fork on GitHub</li>
+            <li>Open your fork on GitHub</li>
             <li>Click <strong className="text-foreground">&quot;Sync fork&quot;</strong> → <strong className="text-foreground">&quot;Update branch&quot;</strong></li>
             <li>Vercel will automatically redeploy with the latest changes</li>
           </ol>
-          <p className="pt-2">
+          <Button variant="outline" size="sm" asChild className="mt-1">
+            <a href={getForkUrl()} target="_blank" rel="noopener noreferrer">
+              Open your fork on GitHub
+            </a>
+          </Button>
+          <p className="pt-1">
             The build process runs database migrations automatically, so new tables or columns are applied on deploy.
           </p>
         </CardContent>

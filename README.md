@@ -60,12 +60,10 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | Yes | Neon Postgres connection string |
-| `AUTH_PASSWORD` | Yes | Password to log into the app |
-| `AUTH_SECRET` | No | Auto-derived from DATABASE_URL if not set |
-| `CRON_SECRET` | No | Auto-derived from DATABASE_URL if not set |
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Neon Postgres connection string |
+| `AUTH_PASSWORD` | Password to log into the app |
 
 ## Tech Stack
 

@@ -201,8 +201,6 @@ npx drizzle-kit push # Push schema changes to Neon DB (also runs automatically i
 ```
 DATABASE_URL=postgresql://...@...neon.tech/neondb?sslmode=require
 AUTH_PASSWORD=...           # Single password for login
-AUTH_SECRET=...             # Optional — auto-derived from DATABASE_URL if not set
-CRON_SECRET=...             # Optional — auto-derived from DATABASE_URL if not set
 ```
 
 ### Dashboard Features
@@ -250,5 +248,5 @@ CRON_SECRET=...             # Optional — auto-derived from DATABASE_URL if not
 - `AUTH_SECRET` and `CRON_SECRET` are auto-derived from `DATABASE_URL` via HMAC if env vars not set (`src/lib/auth-utils.ts`)
 - Build script runs `drizzle-kit push` before `next build` — tables auto-created on first deploy
 - Deploy button in README uses Vercel's Neon integration for auto-provisioning
-- `APP_VERSION` in `src/lib/version.ts` must be kept in sync with `package.json` version
+- **Version bumping**: before every commit/push, increment `APP_VERSION` and `APP_VERSION_DATE` in `src/lib/version.ts` and `version` in `package.json` (keep in sync). Patch bump for fixes, minor bump for features.
 - About page (`/about`) checks GitHub releases API for updates — unauthenticated, 60 req/hr rate limit
