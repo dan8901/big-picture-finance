@@ -4,8 +4,8 @@ import { createHmac } from "crypto";
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow login page and auth API through
-  if (pathname === "/login" || pathname === "/api/auth") {
+  // Allow login page, auth API, and cron endpoints through
+  if (pathname === "/login" || pathname === "/api/auth" || pathname.startsWith("/api/cron/")) {
     return NextResponse.next();
   }
 
