@@ -33,6 +33,7 @@ export const categories = pgTable("categories", {
   name: text("name").notNull().unique(),
   parentCategory: text("parent_category"),
   isDefault: integer("is_default").default(0).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
 });
 
 export const events = pgTable("events", {
@@ -58,6 +59,7 @@ export const transactions = pgTable("transactions", {
   sourceFile: text("source_file"),
   excluded: integer("excluded").default(0).notNull(),
   isRecurring: integer("is_recurring").default(0).notNull(),
+  note: text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -129,6 +131,7 @@ export const merchantCategories = pgTable(
     merchantName: text("merchant_name").notNull(),
     category: text("category").notNull(),
     isUserOverride: integer("is_user_override").default(0).notNull(),
+    displayName: text("display_name"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [uniqueIndex("merchant_name_idx").on(table.merchantName)]

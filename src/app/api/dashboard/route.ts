@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { transactions, manualIncomeEntries, accounts, events, appConfig } from "@/db/schema";
+import { transactions, manualIncomeEntries, accounts, events, appConfig, merchantCategories } from "@/db/schema";
 import { sql, and, eq, inArray } from "drizzle-orm";
 import { getExchangeRatesForDates } from "@/lib/exchange";
 import { TRANSACTION_ACCOUNT_TYPES } from "@/lib/accounts";
@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
       eventId: transactions.eventId,
       accountId: transactions.accountId,
       isRecurring: transactions.isRecurring,
+      note: transactions.note,
     })
     .from(transactions)
     .where(
@@ -35,6 +36,16 @@ export async function GET(request: NextRequest) {
         eq(transactions.excluded, 0)
       )
     );
+
+  // Load merchant display names for consolidation
+  const displayNameRows = await db
+    .select({
+      merchantName: merchantCategories.merchantName,
+      displayName: merchantCategories.displayName,
+    })
+    .from(merchantCategories)
+    .where(sql`${merchantCategories.displayName} IS NOT NULL`);
+  const displayNameMap = new Map(displayNameRows.map((r) => [r.merchantName, r.displayName!]));
 
   // Get accounts for owner info
   const accts = await db.select().from(accounts);
@@ -276,11 +287,12 @@ export async function GET(request: NextRequest) {
         (expensesByCategoryILS[category] ?? 0) + (isILS ? absRaw : ilsEquiv);
       monthlyData[month].expensesILS += isILS ? absRaw : ilsEquiv;
       // Track per-merchant spend within category
-      const merchantKey = tx.description
+      const rawMerchantKey = tx.description
         .toLowerCase()
         .trim()
         .replace(/[\u200f\u200e\u202a\u202b\u202c\u2069\u2068\u2067\u2066\u00a0]/g, "")
         .replace(/\s+/g, " ");
+      const merchantKey = displayNameMap.get(rawMerchantKey) ?? rawMerchantKey;
       if (!merchantsByCategory[category]) merchantsByCategory[category] = {};
       if (!merchantsByCategory[category][merchantKey]) {
         merchantsByCategory[category][merchantKey] = { usd: 0, ils: 0, count: 0, recurringCount: 0 };
@@ -377,9 +389,14 @@ export async function GET(request: NextRequest) {
         const rate = ilsRates.get(tx.date) ?? 1;
         usdAmount = Math.abs(rawAmount * rate);
       }
+      const rawKey = tx.description.toLowerCase().trim()
+        .replace(/[\u200f\u200e\u202a\u202b\u202c\u2069\u2068\u2067\u2066\u00a0]/g, "")
+        .replace(/\s+/g, " ");
       return {
         date: tx.date,
         description: tx.description,
+        displayName: displayNameMap.get(rawKey) ?? null,
+        note: tx.note ?? null,
         amount: rawAmount,
         currency: tx.currency,
         usdAmount,

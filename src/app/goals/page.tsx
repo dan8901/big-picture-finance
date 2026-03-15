@@ -35,17 +35,7 @@ function formatPeriod(period: string) {
   return period;
 }
 
-const CATEGORIES = [
-  "Food & Dining",
-  "Transportation",
-  "Housing & Utilities",
-  "Health & Insurance",
-  "Shopping & Clothing",
-  "Entertainment & Leisure",
-  "Transfers",
-  "Government & Taxes",
-  "Other",
-];
+// Categories fetched dynamically from API
 
 type AchievementRecord = { period: string; achieved: boolean; actualAmount: number };
 
@@ -398,17 +388,19 @@ function CreateGoalDialog({
   open,
   onClose,
   onCreated,
+  categories: categoryOptions,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  categories: string[];
 }) {
   const [name, setName] = useState("");
   const [type, setType] = useState<"budget_cap" | "savings_target" | "savings_amount">(
     "budget_cap"
   );
   const [scope, setScope] = useState<"overall" | "category">("overall");
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [category, setCategory] = useState(categoryOptions[0] || "");
   const [owner, setOwner] = useState("");
   const [targetAmount, setTargetAmount] = useState("");
   const [currency, setCurrency] = useState("ILS");
@@ -505,7 +497,7 @@ function CreateGoalDialog({
                     onChange={(e) => setCategory(e.target.value)}
                     className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
                   >
-                    {CATEGORIES.map((c) => (
+                    {categoryOptions.map((c) => (
                       <option key={c} value={c}>
                         {c}
                       </option>
@@ -734,6 +726,7 @@ function EditGoalDialog({
 
 export default function GoalsPage() {
   const [goalsData, setGoalsData] = useState<GoalData[]>([]);
+  const [categoryList, setCategoryList] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editingGoal, setEditingGoal] = useState<GoalData | null>(null);
@@ -756,9 +749,16 @@ export default function GoalsPage() {
     }
   }, []);
 
+  const fetchCategories = useCallback(async () => {
+    const res = await fetch("/api/categories");
+    const data = await res.json();
+    setCategoryList((data.categories || []).map((c: { name: string }) => c.name));
+  }, []);
+
   useEffect(() => {
     fetchGoals();
-  }, [fetchGoals]);
+    fetchCategories();
+  }, [fetchGoals, fetchCategories]);
 
   async function handleDelete(id: number) {
     await fetch(`/api/goals?id=${id}`, { method: "DELETE" });
@@ -1053,6 +1053,7 @@ export default function GoalsPage() {
         open={showCreate}
         onClose={() => setShowCreate(false)}
         onCreated={fetchGoals}
+        categories={categoryList}
       />
       <EditGoalDialog
         goal={editingGoal}

@@ -52,6 +52,7 @@ interface Transaction {
   eventId: number | null;
   sourceFile: string | null;
   excluded: number;
+  note: string | null;
 }
 
 interface Account {
@@ -68,17 +69,7 @@ interface Event {
   endDate: string | null;
 }
 
-const STANDARD_CATEGORIES = [
-  "Food & Dining",
-  "Transportation",
-  "Housing & Utilities",
-  "Health & Insurance",
-  "Shopping & Clothing",
-  "Entertainment & Leisure",
-  "Transfers",
-  "Government & Taxes",
-  "Other",
-];
+// Categories fetched dynamically from API — initialized empty, populated on mount
 
 // Module-level cache — survives component unmount/remount
 let txCache: { key: string; transactions: Transaction[] } | null = null;
@@ -93,6 +84,7 @@ function TransactionsContent() {
   const [transactions, setTransactions] = useState<Transaction[]>(txCache?.transactions ?? []);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
+  const [categoryList, setCategoryList] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState<Set<string>>(new Set());
   const [ownerFilter, setOwnerFilter] = useState("all");
@@ -106,6 +98,9 @@ function TransactionsContent() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(!txCache);
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  const [editingDisplayNameTxId, setEditingDisplayNameTxId] = useState<number | null>(null);
+  const [displayNameMap, setDisplayNameMap] = useState<Record<string, string>>({});
   const [actionsForTx, setActionsForTx] = useState<Transaction | null>(null);
   const [categorizing, setCategorizing] = useState(false);
   const [catStatus, setCatStatus] = useState("");
@@ -188,10 +183,24 @@ function TransactionsContent() {
     setEvents(await res.json());
   }, []);
 
+  const fetchCategories = useCallback(async () => {
+    const res = await fetch("/api/categories");
+    const data = await res.json();
+    setCategoryList((data.categories || []).map((c: { name: string }) => c.name));
+  }, []);
+
+  const fetchDisplayNames = useCallback(async () => {
+    const res = await fetch("/api/merchants?mapOnly=1");
+    const data = await res.json();
+    setDisplayNameMap(data.displayNames ?? {});
+  }, []);
+
   useEffect(() => {
     fetchAccounts();
     fetchEvents();
-  }, [fetchAccounts, fetchEvents]);
+    fetchCategories();
+    fetchDisplayNames();
+  }, [fetchAccounts, fetchEvents, fetchCategories, fetchDisplayNames]);
 
   useEffect(() => {
     fetchTransactions();
@@ -208,6 +217,12 @@ function TransactionsContent() {
 
   const eventName = (eventId: number | null) =>
     eventId ? events.find((e) => e.id === eventId)?.name : null;
+
+  const merchantKey = (description: string) =>
+    description.toLowerCase().trim();
+
+  const getDisplayName = (description: string) =>
+    displayNameMap[merchantKey(description)] ?? null;
 
   const uniqueCategories = useMemo(
     () =>
@@ -242,9 +257,12 @@ function TransactionsContent() {
         if (!tx.category || !categoryFilter.has(tx.category)) return false;
       }
       if (search) {
+        const s = search.toLowerCase();
         return (
-          tx.description.toLowerCase().includes(search.toLowerCase()) ||
-          tx.category?.toLowerCase().includes(search.toLowerCase())
+          tx.description.toLowerCase().includes(s) ||
+          tx.category?.toLowerCase().includes(s) ||
+          tx.note?.toLowerCase().includes(s) ||
+          getDisplayName(tx.description)?.toLowerCase().includes(s)
         );
       }
       return true;
@@ -404,6 +422,44 @@ function TransactionsContent() {
     }
   }
 
+  async function updateNote(txId: number, note: string) {
+    const newNote = note.trim() || null;
+    setTransactions((prev) =>
+      prev.map((tx) => (tx.id === txId ? { ...tx, note: newNote } : tx))
+    );
+    setEditingNoteId(null);
+    const res = await fetch("/api/transactions/bulk", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [txId], note: newNote }),
+    });
+    if (!res.ok) {
+      toast.error("Failed to update note");
+      fetchTransactions();
+    }
+  }
+
+  async function updateDisplayName(rawDesc: string, displayName: string) {
+    const key = merchantKey(rawDesc);
+    const newName = displayName.trim() || null;
+    setDisplayNameMap((prev) => {
+      const next = { ...prev };
+      if (newName) next[key] = newName;
+      else delete next[key];
+      return next;
+    });
+    setEditingDisplayNameTxId(null);
+    const res = await fetch("/api/merchants", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ merchantName: key, displayName: newName }),
+    });
+    if (!res.ok) {
+      toast.error("Failed to update display name");
+      fetchDisplayNames();
+    }
+  }
+
   async function handleCategorize() {
     setCategorizing(true);
     try {
@@ -465,10 +521,11 @@ function TransactionsContent() {
   }
 
   function exportCSV() {
-    const headers = ["Date", "Description", "Amount", "Currency", "Category", "Account", "Owner", "Event"];
+    const headers = ["Date", "Description", "Note", "Amount", "Currency", "Category", "Account", "Owner", "Event"];
     const rows = sorted.map((tx) => [
       tx.date,
       `"${tx.description.replace(/"/g, '""')}"`,
+      `"${(tx.note ?? "").replace(/"/g, '""')}"`,
       tx.amount,
       tx.currency,
       tx.category ?? "",
@@ -499,7 +556,7 @@ function TransactionsContent() {
           onClick={handleCategorize}
           disabled={categorizing}
         >
-          {categorizing ? catStatus || "Categorizing..." : "Categorize Transactions"}
+          {categorizing ? catStatus || "Categorizing..." : "Categorize Transactions with AI"}
         </Button>
       </div>
 
@@ -799,7 +856,7 @@ function TransactionsContent() {
                   <SelectValue placeholder="Set category..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {STANDARD_CATEGORIES.map((cat) => (
+                  {categoryList.map((cat) => (
                     <SelectItem key={cat} value={cat}>
                       {cat}
                     </SelectItem>
@@ -907,22 +964,77 @@ function TransactionsContent() {
                         {tx.date}
                       </TableCell>
                       <TableCell className="max-w-[300px]">
-                        <div className="flex items-center gap-1 group/row">
-                          <span
-                            className={`truncate ${tx.excluded ? "line-through" : ""}`}
-                            title={tx.description}
-                          >
-                            {tx.description}
-                          </span>
-                          {!tx.excluded && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-5 px-1 text-xs opacity-0 group-hover/row:opacity-100 shrink-0"
-                              onClick={() => setActionsForTx(tx)}
+                        <div className="group/row" title={getDisplayName(tx.description) ? `Raw: ${tx.description}` : tx.description}>
+                          <div className="flex items-center gap-1">
+                            {editingDisplayNameTxId === tx.id ? (
+                              <Input
+                                autoFocus
+                                defaultValue={getDisplayName(tx.description) ?? tx.description}
+                                className="h-6 text-xs w-[200px]"
+                                onBlur={(e) => updateDisplayName(tx.description, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") updateDisplayName(tx.description, (e.target as HTMLInputElement).value);
+                                  if (e.key === "Escape") setEditingDisplayNameTxId(null);
+                                }}
+                              />
+                            ) : (
+                              <span
+                                className={`truncate cursor-pointer hover:underline ${tx.excluded ? "line-through" : ""}`}
+                                onClick={() => {
+                                  setEditingDisplayNameTxId(tx.id);
+                                  setEditingCategoryId(null);
+                                  setEditingNoteId(null);
+                                }}
+                              >
+                                {getDisplayName(tx.description) ?? tx.description}
+                              </span>
+                            )}
+                            {!tx.excluded && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 px-1 text-xs opacity-0 group-hover/row:opacity-100 shrink-0"
+                                onClick={() => setActionsForTx(tx)}
+                              >
+                                Actions
+                              </Button>
+                            )}
+                          </div>
+                          {/* Note row */}
+                          {editingNoteId === tx.id ? (
+                            <Input
+                              autoFocus
+                              defaultValue={tx.note ?? ""}
+                              placeholder="Add a note..."
+                              className="h-5 text-xs mt-0.5 w-[200px]"
+                              onBlur={(e) => updateNote(tx.id, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") updateNote(tx.id, (e.target as HTMLInputElement).value);
+                                if (e.key === "Escape") setEditingNoteId(null);
+                              }}
+                            />
+                          ) : tx.note ? (
+                            <div
+                              className="text-xs text-muted-foreground italic truncate cursor-pointer hover:underline mt-0.5"
+                              onClick={() => {
+                                setEditingNoteId(tx.id);
+                                setEditingCategoryId(null);
+                                setEditingDisplayNameTxId(null);
+                              }}
                             >
-                              Actions
-                            </Button>
+                              {tx.note}
+                            </div>
+                          ) : (
+                            <div
+                              className="text-xs text-muted-foreground/40 cursor-pointer opacity-0 group-hover/row:opacity-100 mt-0.5"
+                              onClick={() => {
+                                setEditingNoteId(tx.id);
+                                setEditingCategoryId(null);
+                                setEditingDisplayNameTxId(null);
+                              }}
+                            >
+                              + note
+                            </div>
                           )}
                         </div>
                       </TableCell>
@@ -956,7 +1068,7 @@ function TransactionsContent() {
                               <SelectItem value="uncategorized">
                                 Uncategorized
                               </SelectItem>
-                              {STANDARD_CATEGORIES.map((cat) => (
+                              {categoryList.map((cat) => (
                                 <SelectItem key={cat} value={cat}>
                                   {cat}
                                 </SelectItem>
@@ -966,7 +1078,7 @@ function TransactionsContent() {
                         ) : (
                           <span
                             className="text-xs cursor-pointer hover:underline"
-                            onClick={() => setEditingCategoryId(tx.id)}
+                            onClick={() => { setEditingCategoryId(tx.id); setEditingNoteId(null); setEditingDisplayNameTxId(null); }}
                           >
                             {tx.category ? (
                               <Badge variant="secondary">{tx.category}</Badge>
@@ -1030,7 +1142,7 @@ function TransactionsContent() {
               <div className="border-t pt-2">
                 <p className="text-xs text-muted-foreground mb-2">Set category for all with this description:</p>
                 <div className="grid grid-cols-2 gap-1">
-                  {STANDARD_CATEGORIES.map((cat) => (
+                  {categoryList.map((cat) => (
                     <Button
                       key={cat}
                       variant="ghost"

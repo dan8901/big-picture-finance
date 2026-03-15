@@ -3,70 +3,7 @@ import { db } from "@/db";
 import { transactions, merchantCategories } from "@/db/schema";
 import { eq, isNull, sql, and } from "drizzle-orm";
 import { getLLMClient } from "@/lib/llm";
-
-const STANDARD_CATEGORIES = [
-  "Food & Dining",
-  "Transportation",
-  "Housing & Utilities",
-  "Health & Insurance",
-  "Shopping & Clothing",
-  "Entertainment & Leisure",
-  "Transfers",
-  "Government & Taxes",
-  "Other",
-];
-
-// Map existing parser categories to standard ones
-const CATEGORY_MAP: Record<string, string> = {
-  // Old standard categories → new consolidated
-  "Food & Groceries": "Food & Dining",
-  "Restaurants & Cafes": "Food & Dining",
-  "Health & Medical": "Health & Insurance",
-  Insurance: "Health & Insurance",
-  Subscriptions: "Other",
-  Education: "Other",
-  // Discover
-  Merchandise: "Shopping & Clothing",
-  Services: "Other",
-  "Restaurants/Dining": "Food & Dining",
-  Restaurants: "Food & Dining",
-  Supermarkets: "Food & Dining",
-  "Department Stores": "Shopping & Clothing",
-  "Travel/ Entertainment": "Entertainment & Leisure",
-  "Payments and Credits": "Transfers",
-  "Awards and Rebate Credits": "Other",
-  Fees: "Other",
-  "Government Services": "Government & Taxes",
-  // Max (Hebrew)
-  "מזון וצריכה": "Food & Dining",
-  "מסעדות, קפה וברים": "Food & Dining",
-  "תחבורה ורכבים": "Transportation",
-  "רפואה ובתי מרקחת": "Health & Insurance",
-  "פנאי, בידור וספורט": "Entertainment & Leisure",
-  אופנה: "Shopping & Clothing",
-  "קוסמטיקה וטיפוח": "Shopping & Clothing",
-  "חשמל ומחשבים": "Shopping & Clothing",
-  "העברת כספים": "Transfers",
-  שונות: "Other",
-  "עירייה וממשלה": "Government & Taxes",
-  ביטוח: "Health & Insurance",
-  "דלק, חשמל וגז": "Housing & Utilities",
-  "טיסות ותיירות": "Entertainment & Leisure",
-  "עיצוב הבית": "Shopping & Clothing",
-  "ספרים ודפוס": "Other",
-  "שירותי תקשורת": "Other",
-  // SDFCU
-  Transfers: "Transfers",
-  "Other Expenses": "Other",
-  "Service Charges/Fees": "Other",
-  // IBKR
-  Dividend: "Other",
-  "Credit Interest": "Other",
-  "Debit Interest": "Other",
-  Withdrawal: "Transfers",
-  Deposit: "Transfers",
-  "Payment in Lieu": "Other",
-};
+import { getCategoryNames, getCategoryMap } from "@/lib/categories";
 
 // GET: return categorization status
 export async function GET() {
@@ -163,6 +100,7 @@ async function getUncategorizedDescriptions() {
 
 async function categorizeBatch(descriptions: string[]) {
   const llm = await getLLMClient("categorize");
+  const categoryNames = await getCategoryNames();
 
   const numbered = descriptions.map((d, idx) => `${idx + 1}. ${d}`).join("\n");
 
@@ -171,11 +109,11 @@ async function categorizeBatch(descriptions: string[]) {
       {
         role: "user",
         content: `Categorize these transaction descriptions into one of these categories:
-${STANDARD_CATEGORIES.join(", ")}
+${categoryNames.join(", ")}
 
 The descriptions may be in Hebrew or English. They are from Israeli and American bank/credit card statements.
 
-Return ONLY a JSON object mapping the number to the category. Example: {"1": "Food & Groceries", "2": "Transportation"}
+Return ONLY a JSON object mapping the number to the category. Example: {"1": "${categoryNames[0]}", "2": "${categoryNames[1] || categoryNames[0]}"}
 
 Descriptions:
 ${numbered}`,
@@ -191,6 +129,7 @@ ${numbered}`,
     return NextResponse.json({ categorized: 0, error: "No JSON in response" });
   }
 
+  const categorySet = new Set(categoryNames);
   let categorized = 0;
   try {
     const mapping = JSON.parse(jsonMatch[0]) as Record<string, string>;
@@ -198,7 +137,7 @@ ${numbered}`,
     for (const [numStr, category] of Object.entries(mapping)) {
       const idx = parseInt(numStr) - 1;
       if (idx < 0 || idx >= descriptions.length) continue;
-      if (!STANDARD_CATEGORIES.includes(category)) continue;
+      if (!categorySet.has(category)) continue;
 
       const desc = descriptions[idx];
 
@@ -238,8 +177,9 @@ ${numbered}`,
 
 async function normalizeCategories() {
   let updated = 0;
+  const categoryMap = getCategoryMap();
 
-  for (const [from, to] of Object.entries(CATEGORY_MAP)) {
+  for (const [from, to] of Object.entries(categoryMap)) {
     const result = await db
       .update(transactions)
       .set({ category: to })
@@ -251,6 +191,9 @@ async function normalizeCategories() {
 }
 
 async function categorizeWithLLM() {
+  const categoryNames = await getCategoryNames();
+  const categorySet = new Set(categoryNames);
+
   // Load cached merchant→category mappings
   const cached = await db.select().from(merchantCategories);
   const cachedMap = new Map(
@@ -322,11 +265,11 @@ async function categorizeWithLLM() {
         {
           role: "user",
           content: `Categorize these transaction descriptions into one of these categories:
-${STANDARD_CATEGORIES.join(", ")}
+${categoryNames.join(", ")}
 
 The descriptions may be in Hebrew or English. They are from Israeli and American bank/credit card statements.
 
-Return ONLY a JSON object mapping the number to the category. Example: {"1": "Food & Groceries", "2": "Transportation"}
+Return ONLY a JSON object mapping the number to the category. Example: {"1": "${categoryNames[0]}", "2": "${categoryNames[1] || categoryNames[0]}"}
 
 Descriptions:
 ${numbered}`,
@@ -347,7 +290,7 @@ ${numbered}`,
       for (const [numStr, category] of Object.entries(mapping)) {
         const idx = parseInt(numStr) - 1;
         if (idx < 0 || idx >= batch.length) continue;
-        if (!STANDARD_CATEGORIES.includes(category)) continue;
+        if (!categorySet.has(category)) continue;
 
         const desc = batch[idx];
         const ids = descriptionGroups.get(desc);

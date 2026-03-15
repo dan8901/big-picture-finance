@@ -27,6 +27,9 @@ src/
 │   ├── excluded/page.tsx           # View and manage excluded transactions
 │   ├── chat/page.tsx               # AI chatbot — ask natural language questions about finances
 │   ├── goals/page.tsx              # Goals — budget caps, savings targets, streaks, gamification
+│   ├── categories/page.tsx         # Category management + migration wizard
+│   ├── merchants/page.tsx          # Merchant management — display names, merge, category editing
+│   ├── insights/page.tsx           # AI Insights — 5 pre-built insight cards generated in parallel
 │   ├── settings/page.tsx           # LLM provider config + API usage/cost tracking
 │   ├── about/page.tsx              # About page — version display, update checker, update instructions
 │   └── api/
@@ -40,9 +43,12 @@ src/
 │       ├── net-worth/route.ts      # CRUD with account joins
 │       ├── events/route.ts         # CRUD for trip/event tagging
 │       ├── exchange-rates/route.ts # GET (needed dates) + POST (fetch & cache rates)
+│       ├── categories/route.ts     # Category CRUD, reorder, migration wizard endpoint
+│       ├── merchants/route.ts      # Merchant display names: GET/PATCH/POST (merge)
 │       ├── categorize/route.ts     # AI categorization + normalization + recurring detection
 │       ├── chat/route.ts           # AI chatbot SSE endpoint (tool-calling loop)
-│       ├── chat/tools.ts           # 8 query tools for chatbot (transactions, categories, trends, etc.)
+│       ├── chat/tools.ts           # 11 query tools for chatbot (transactions, categories, trends, etc.)
+│       ├── insights/route.ts      # AI Insights SSE endpoint — 5 curated prompts with tool-calling
 │       ├── goals/route.ts          # CRUD + progress computation for goals
 │       ├── goals/evaluate/route.ts # Evaluate goals for past periods, record achievements
 │       ├── goals/reorder/route.ts  # PATCH: persist drag-and-drop goal ordering
@@ -57,8 +63,10 @@ src/
 │   └── index.ts                    # Lazy DB singleton (Neon serverless)
 └── lib/
     ├── utils.ts                    # cn() helper
+    ├── categories.ts               # Category DB reader, cache, seeding, CATEGORY_MAP
     ├── exchange.ts                 # Exchange rate DB cache reader
     ├── llm.ts                      # Unified LLM abstraction (OpenAI + Anthropic clients)
+    ├── chat-system-prompt.ts       # Shared system prompt for chat + insights
     ├── llm-presets.ts              # Provider presets, model lists, cost estimation
     ├── evaluate-goals.ts           # Shared goal evaluation logic (auto-evaluate on data change + stale check)
     ├── version.ts                  # APP_VERSION, REPO_URL, REPO_API_URL constants
@@ -109,12 +117,31 @@ src/
 - Dedicated `/excluded` page to review and un-exclude
 
 ### Categorization
-- 9 standard categories: Food & Dining, Transportation, Housing & Utilities, Health & Insurance, Shopping & Clothing, Entertainment & Leisure, Transfers, Government & Taxes, Other
-- AI categorization via NVIDIA-hosted Claude API (OpenAI-compatible endpoint)
+- Categories are **user-configurable** — stored in `categories` DB table, managed via `/categories` page
+- 9 default categories seeded on first access: Food & Dining, Transportation, Housing & Utilities, Health & Insurance, Shopping & Clothing, Entertainment & Leisure, Transfers, Government & Taxes, Other
+- **Migration wizard**: `/categories` page has a "Reconfigure" wizard (4-step: define → map → handle goals → review & apply) for renaming, adding, removing, or merging categories with cascading updates to transactions, merchant cache, and goals
+- Category list is fetched dynamically from `/api/categories` by transactions page, goals page, and AI categorization
+- Shared library `src/lib/categories.ts`: `getCategories()`, `getCategoryNames()`, `getCategoryMap()` with 60s in-memory cache
+- `CATEGORY_MAP` in `src/lib/categories.ts` normalizes parser-specific categories (including Hebrew) to standard set
+- AI categorization via configured LLM provider (OpenAI-compatible endpoint)
 - Category mappings cached in `merchant_categories` table (auto-applied on future imports)
 - User overrides (`isUserOverride = 1`) take precedence over AI
-- `CATEGORY_MAP` in `categorize/route.ts` normalizes parser-specific categories to standard set
 - Recurring detection: transactions appearing in 3+ months flagged via `isRecurring` column
+
+### Transaction Notes
+- Per-transaction `note` column (nullable text) for adding context ("check - rent", "panda - mattress")
+- Click-to-edit on transactions page (click "+ note" on hover, click existing note to edit)
+- Searchable: note text included in the transactions page search filter
+- Included in CSV export and chat tool results
+
+### Merchant Display Names & Consolidation
+- `displayName` column on `merchant_categories` table — presentation-only, does not affect dedup or exclusion rules
+- When set, dashboard/chat analytics group by displayName instead of raw description
+- Inline editing on transactions page: click description to set display name (applies to all matching transactions)
+- Dedicated `/merchants` page: list, rename, merge merchants, edit categories
+- Merge: select multiple merchants → set shared displayName + category → all matching transactions updated
+- `GET /api/merchants?mapOnly=1` returns lightweight displayName map for client-side rendering
+- Display names do NOT affect: deduplication (uses raw description), exclusion rules, AI categorization
 
 ### Parsers
 - Each institution has its own file in `src/lib/parsers/`
@@ -158,17 +185,17 @@ src/
 
 14 tables defined in `src/db/schema.ts`:
 - `accounts` — financial accounts with type, institution (nullable — only for transaction accounts), currency, owner
-- `transactions` — imported transactions with category, event, excluded, isRecurring flags
+- `transactions` — imported transactions with category, event, excluded, isRecurring flags, optional note
 - `exchange_rates` — cached daily currency rates (unique on date+pair)
 - `manual_income_entries` — recurring income with start month + monthly amount
 - `net_worth_snapshots` — point-in-time balance per account
 - `events` — trips/one-time expenses for transaction grouping
 - `exclusion_rules` — account+description pairs to auto-exclude on import
-- `merchant_categories` — merchant→category mappings (AI + user overrides)
+- `merchant_categories` — merchant→category mappings (AI + user overrides) + optional displayName for consolidation
 - `import_logs` — audit log of file imports (account, filename, parser, row counts, timestamp)
 - `llm_config` — LLM provider configuration (single-row, provider/apiKey/baseUrl/model)
 - `llm_usage_logs` — per-request token usage and estimated cost tracking (feature, model, tokens, cost)
-- `categories` — category definitions (unused, reserved for future)
+- `categories` — user-configurable category list with sortOrder, isDefault flag; auto-seeded with 9 defaults
 - `goals` — financial goals (budget_cap, savings_target, savings_amount) with scope, owner, period
 - `goal_achievements` — per-period achievement records for streak/history tracking (unique on goalId+period)
 - `app_config` — single-row app configuration (e.g., `allStartDate` override for dashboard "All" button)
@@ -193,6 +220,14 @@ npx drizzle-kit push # Push schema changes to Neon DB (also runs automatically i
 - Conversation history stored in client React state only (ephemeral, not persisted)
 - Uses shared LLM abstraction (`src/lib/llm.ts`) — supports OpenAI-compatible providers + native Anthropic API
 - Frontend parses SSE with `response.body.getReader()` — no external SSE library needed
+
+### AI Insights
+- `/insights` page with 5 pre-built insight cards: Smart Savings, Fun Facts, Monthly Pulse, Goal Check-in, Year in Review
+- "Generate Insights" button fires all 5 cards in parallel via SSE — results stream in as each completes
+- Reuses same tool-calling infrastructure as chat: `getSystemPrompt()` (shared via `src/lib/chat-system-prompt.ts`), `executeTool()`, `getLLMClient("chat")`
+- Each card has individual regenerate button after first generation
+- `POST /api/insights` accepts `{ type }` — same SSE event format as chat (`status`, `delta`, `done`, `error`)
+- Curated prompts per insight type guide the LLM to use appropriate query tools and format responses as markdown
 
 ### LLM Configuration
 - Provider config stored in `llm_config` table (single row, UI-configurable at `/settings`)

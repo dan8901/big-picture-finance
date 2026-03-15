@@ -93,6 +93,8 @@ interface DashboardData {
   topExpenseTransactions: Array<{
     date: string;
     description: string;
+    displayName: string | null;
+    note: string | null;
     amount: number;
     currency: string;
     usdAmount: number;
@@ -1194,8 +1196,11 @@ export default function DashboardPage() {
                     {data.topExpenseTransactions.map((tx, i) => (
                       <TableRow key={i}>
                         <TableCell className="whitespace-nowrap">{tx.date}</TableCell>
-                        <TableCell className="max-w-[250px] truncate" title={tx.description}>
-                          {tx.description}
+                        <TableCell className="max-w-[250px]" title={tx.displayName ? tx.description : undefined}>
+                          <div className="truncate">{tx.displayName ?? tx.description}</div>
+                          {tx.note && (
+                            <div className="text-xs text-muted-foreground italic truncate">{tx.note}</div>
+                          )}
                         </TableCell>
                         <TableCell className="text-muted-foreground">{tx.category}</TableCell>
                         <TableCell className="text-muted-foreground">{tx.owner}</TableCell>

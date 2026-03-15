@@ -10,6 +10,7 @@ export async function PATCH(request: NextRequest) {
     eventId,
     category,
     excluded,
+    note,
     excludeByDescription,
     includeByDescription,
     categoryByDescription,
@@ -19,6 +20,7 @@ export async function PATCH(request: NextRequest) {
     eventId?: number | null;
     category?: string | null;
     excluded?: number;
+    note?: string | null;
     excludeByDescription?: string;
     includeByDescription?: string;
     categoryByDescription?: { description: string; category: string };
@@ -124,6 +126,7 @@ export async function PATCH(request: NextRequest) {
   if (eventId !== undefined) updates.eventId = eventId;
   if (category !== undefined) updates.category = category;
   if (excluded !== undefined) updates.excluded = excluded;
+  if (note !== undefined) updates.note = note;
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json(

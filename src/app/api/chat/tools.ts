@@ -7,6 +7,7 @@ import {
   netWorthSnapshots,
   goals,
   goalAchievements,
+  merchantCategories,
 } from "@/db/schema";
 import { eq, and, gte, lte, sql, isNull, desc, asc } from "drizzle-orm";
 import { getExchangeRatesForDates } from "@/lib/exchange";
@@ -462,6 +463,7 @@ async function queryTransactions(params: ToolParams) {
       accountId: transactions.accountId,
       isRecurring: transactions.isRecurring,
       eventId: transactions.eventId,
+      note: transactions.note,
     })
     .from(transactions)
     .where(where)
@@ -482,6 +484,7 @@ async function queryTransactions(params: ToolParams) {
       id: r.id,
       date: r.date,
       description: r.description,
+      note: r.note ?? undefined,
       amount: parseFloat(r.amount),
       currency: r.currency,
       amountUSD: withUSD[i].amountUSD,
@@ -797,12 +800,42 @@ async function getTopMerchants(params: ToolParams) {
     .orderBy(sql`sum(abs(amount::numeric)) desc`)
     .limit(Math.min(limit, 50));
 
-  return rows.map((r) => ({
-    description: r.description,
-    total: parseFloat(r.total),
-    count: Number(r.count),
-    category: r.category ?? "Uncategorized",
-  }));
+  // Load display names for consolidation
+  const dnRows = await db
+    .select({ merchantName: merchantCategories.merchantName, displayName: merchantCategories.displayName })
+    .from(merchantCategories)
+    .where(sql`${merchantCategories.displayName} IS NOT NULL`);
+  const dnMap = new Map(dnRows.map((r) => [r.merchantName, r.displayName!]));
+
+  // Consolidate by display name
+  const consolidated = new Map<string, { displayName: string | null; total: number; count: number; category: string }>();
+  for (const r of rows) {
+    const dn = dnMap.get(r.description);
+    const key = dn ?? r.description;
+    const existing = consolidated.get(key);
+    if (existing) {
+      existing.total += parseFloat(r.total);
+      existing.count += Number(r.count);
+    } else {
+      consolidated.set(key, {
+        displayName: dn ?? null,
+        total: parseFloat(r.total),
+        count: Number(r.count),
+        category: r.category ?? "Uncategorized",
+      });
+    }
+  }
+
+  return [...consolidated.entries()]
+    .sort(([, a], [, b]) => b.total - a.total)
+    .slice(0, Math.min(limit, 50))
+    .map(([name, d]) => ({
+      description: name,
+      displayName: d.displayName,
+      total: d.total,
+      count: d.count,
+      category: d.category,
+    }));
 }
 
 async function getNetWorthHistory(params: ToolParams) {
