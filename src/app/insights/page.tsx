@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -52,6 +52,35 @@ const CARD_DEFS: Array<{ type: InsightType; title: string; description: string; 
   { type: "year-in-review", title: "Year in Review", description: "Key highlights and trends for the year", icon: CalendarIcon },
 ];
 
+const CACHE_KEY = "insights-cache";
+
+interface CachedInsights {
+  generatedAt: string;
+  cards: Record<string, string>; // type → content
+}
+
+function loadCache(): CachedInsights | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as CachedInsights;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(cards: InsightCard[]) {
+  const data: CachedInsights = {
+    generatedAt: new Date().toISOString(),
+    cards: Object.fromEntries(
+      cards.filter((c) => c.status === "done" && c.content).map((c) => [c.type, c.content])
+    ),
+  };
+  if (Object.keys(data.cards).length > 0) {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+  }
+}
+
 function initCards(): InsightCard[] {
   return CARD_DEFS.map((d) => ({
     ...d,
@@ -64,7 +93,24 @@ function initCards(): InsightCard[] {
 export default function InsightsPage() {
   const [cards, setCards] = useState<InsightCard[]>(initCards);
   const [hasGenerated, setHasGenerated] = useState(false);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
   const abortRefs = useRef<Map<InsightType, AbortController>>(new Map());
+
+  // Load cached insights on mount
+  useEffect(() => {
+    const cached = loadCache();
+    if (cached && Object.keys(cached.cards).length > 0) {
+      setCards((prev) =>
+        prev.map((c) => {
+          const content = cached.cards[c.type];
+          if (content) return { ...c, status: "done" as const, content };
+          return c;
+        })
+      );
+      setHasGenerated(true);
+      setCachedAt(cached.generatedAt);
+    }
+  }, []);
 
   const updateCard = useCallback((type: InsightType, updates: Partial<InsightCard>) => {
     setCards((prev) => prev.map((c) => (c.type === type ? { ...c, ...updates } : c)));
@@ -118,6 +164,11 @@ export default function InsightsPage() {
               return;
             } else if (event.type === "done") {
               updateCard(type, { status: "done" });
+              // Save to cache after state updates
+              setTimeout(() => {
+                setCards((prev) => { saveCache(prev); return prev; });
+                setCachedAt(new Date().toISOString());
+              }, 0);
               return;
             }
           } catch {
@@ -128,6 +179,12 @@ export default function InsightsPage() {
 
       // Stream ended without explicit done event
       updateCard(type, { status: content ? "done" : "error", error: content ? undefined : "No response received" });
+      if (content) {
+        setTimeout(() => {
+          setCards((prev) => { saveCache(prev); return prev; });
+          setCachedAt(new Date().toISOString());
+        }, 0);
+      }
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
       updateCard(type, { status: "error", error: (err as Error).message });
@@ -151,6 +208,11 @@ export default function InsightsPage() {
           <p className="text-muted-foreground">
             Generate personalized financial insights powered by AI
           </p>
+          {cachedAt && !isAnyLoading && (
+            <p className="text-xs text-muted-foreground/60">
+              Last generated: {new Date(cachedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </p>
+          )}
         </div>
         <Button
           onClick={generateAll}
