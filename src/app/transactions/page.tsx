@@ -53,6 +53,8 @@ interface Transaction {
   sourceFile: string | null;
   excluded: number;
   note: string | null;
+  originalCurrency: string | null;
+  originalAmount: string | null;
 }
 
 interface Account {
@@ -1107,6 +1109,13 @@ function TransactionsContent() {
                         {Math.abs(parseFloat(tx.amount)).toLocaleString(
                           undefined,
                           { minimumFractionDigits: 2 }
+                        )}
+                        {tx.originalCurrency && tx.originalCurrency !== tx.currency && tx.originalAmount && (
+                          <div className="text-xs text-muted-foreground">
+                            {tx.originalCurrency === "USD" ? "$" : tx.originalCurrency === "EUR" ? "€" : tx.originalCurrency === "GBP" ? "£" : ""}
+                            {Math.abs(parseFloat(tx.originalAmount)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {" "}{tx.originalCurrency}
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>

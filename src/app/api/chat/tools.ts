@@ -129,12 +129,13 @@ export const toolDefinitions: ChatCompletionTool[] = [
     function: {
       name: "get_events",
       description:
-        "Get trips and events with their total spending. Each event has a name, type, dates, and total expenses in USD and ILS.",
+        "Get trips and events with their total spending. Each event/trip includes destination, category breakdown, and per-day average spending in USD.",
       parameters: {
         type: "object",
         properties: {
           startDate: { type: "string", description: "Filter events starting after this date" },
           endDate: { type: "string", description: "Filter events starting before this date" },
+          type: { type: "string", description: "Filter by event type (e.g. 'trip')" },
         },
       },
     },
@@ -710,10 +711,11 @@ async function getIncomeEntries(params: ToolParams) {
 }
 
 async function getEvents(params: ToolParams) {
-  const { startDate, endDate } = params as { startDate?: string; endDate?: string };
+  const { startDate, endDate, type } = params as { startDate?: string; endDate?: string; type?: string };
   const conditions = [];
   if (startDate) conditions.push(gte(events.startDate, startDate));
   if (endDate) conditions.push(lte(events.startDate, endDate));
+  if (type) conditions.push(sql`${events.type} = ${type}`);
 
   const evts = await db
     .select()
@@ -725,9 +727,11 @@ async function getEvents(params: ToolParams) {
   const eventIds = evts.map((e) => e.id);
   if (eventIds.length === 0) return [];
 
+  // Get per-event, per-category, per-currency spending
   const spending = await db
     .select({
       eventId: transactions.eventId,
+      category: transactions.category,
       total: sql<string>`sum(abs(amount::numeric))`,
       count: sql<number>`count(*)`,
       currency: transactions.currency,
@@ -742,30 +746,55 @@ async function getEvents(params: ToolParams) {
         eq(transactions.excluded, 0)
       )
     )
-    .groupBy(transactions.eventId, transactions.currency);
+    .groupBy(transactions.eventId, transactions.category, transactions.currency);
 
-  const spendMap: Record<number, { usd: number; ils: number; count: number }> = {};
+  // Get exchange rates for ILS conversion
+  const ilsDates = spending.filter((s) => s.currency === "ILS").map(() => evts[0]?.startDate ?? "");
+  const midDates = evts.map((e) => e.startDate);
+  const rates = await getExchangeRatesForDates(midDates, "ILS", "USD");
+  const fallbackRate = rates.values().next().value ?? 0.27;
+
+  const spendMap: Record<number, { usd: number; ils: number; count: number; categories: Record<string, number> }> = {};
   for (const s of spending) {
     const eid = s.eventId!;
-    if (!spendMap[eid]) spendMap[eid] = { usd: 0, ils: 0, count: 0 };
+    if (!spendMap[eid]) spendMap[eid] = { usd: 0, ils: 0, count: 0, categories: {} };
+    const amount = parseFloat(s.total);
     spendMap[eid].count += Number(s.count);
+    const cat = s.category ?? "Uncategorized";
     if (s.currency === "ILS") {
-      spendMap[eid].ils += parseFloat(s.total);
+      spendMap[eid].ils += amount;
+      const usdEquiv = amount * (rates.get(evts.find((e) => e.id === eid)?.startDate ?? "") ?? fallbackRate);
+      spendMap[eid].categories[cat] = (spendMap[eid].categories[cat] ?? 0) + usdEquiv;
     } else {
-      spendMap[eid].usd += parseFloat(s.total);
+      spendMap[eid].usd += amount;
+      spendMap[eid].categories[cat] = (spendMap[eid].categories[cat] ?? 0) + amount;
     }
   }
 
-  return evts.map((e) => ({
-    id: e.id,
-    name: e.name,
-    type: e.type,
-    startDate: e.startDate,
-    endDate: e.endDate,
-    totalUSD: spendMap[e.id]?.usd ?? 0,
-    totalILS: spendMap[e.id]?.ils ?? 0,
-    txCount: spendMap[e.id]?.count ?? 0,
-  }));
+  return evts.map((e) => {
+    const data = spendMap[e.id];
+    const totalUSD = (data?.usd ?? 0) + (data?.ils ?? 0) * (rates.get(e.startDate) ?? fallbackRate);
+    const days = e.endDate
+      ? Math.max(1, Math.ceil((new Date(e.endDate).getTime() - new Date(e.startDate).getTime()) / 86400000) + 1)
+      : 1;
+    return {
+      id: e.id,
+      name: e.name,
+      type: e.type,
+      startDate: e.startDate,
+      endDate: e.endDate,
+      destination: e.destination ?? null,
+      totalUSD: Math.round(totalUSD),
+      totalILS: Math.round(data?.ils ?? 0),
+      txCount: data?.count ?? 0,
+      perDayAvgUSD: Math.round(totalUSD / days),
+      categoryBreakdown: Object.fromEntries(
+        Object.entries(data?.categories ?? {})
+          .sort(([, a], [, b]) => b - a)
+          .map(([k, v]) => [k, Math.round(v)])
+      ),
+    };
+  });
 }
 
 async function getTopMerchants(params: ToolParams) {
@@ -1066,7 +1095,7 @@ async function getFinancialSummary(params: ToolParams) {
     );
 
   const eventIds = evts.map((e) => e.id);
-  let eventSummaries: Array<{ name: string; type: string; totalUSD: number }> = [];
+  let eventSummaries: Array<{ name: string; type: string; destination: string | null; totalUSD: number }> = [];
   if (eventIds.length > 0) {
     const evtSpending = await db
       .select({
@@ -1096,6 +1125,7 @@ async function getFinancialSummary(params: ToolParams) {
     eventSummaries = evts.map((e) => ({
       name: e.name,
       type: e.type,
+      destination: e.destination ?? null,
       totalUSD: Math.round(evtMap[e.id] ?? 0),
     }));
   }

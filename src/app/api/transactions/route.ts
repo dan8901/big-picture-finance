@@ -67,6 +67,8 @@ export async function POST(request: NextRequest) {
       category?: string;
       sourceFile?: string;
       excluded?: boolean;
+      originalCurrency?: string;
+      originalAmount?: number;
     }>;
     accountId: number;
   };
@@ -126,6 +128,8 @@ export async function POST(request: NextRequest) {
           date: item.date,
           amount: String(item.amount),
           currency: item.currency as "USD" | "ILS",
+          originalCurrency: item.originalCurrency ?? null,
+          originalAmount: item.originalAmount != null ? String(item.originalAmount) : null,
           description: item.description,
           category: item.category ?? savedCategory ?? null,
           sourceFile: item.sourceFile ?? null,

@@ -46,7 +46,7 @@ interface LLMCompleteParams {
   messages: LLMMessage[];
   tools?: LLMToolDefinition[];
   maxTokens?: number;
-  feature?: "chat" | "categorize";
+  feature?: "chat" | "categorize" | "trips";
 }
 
 export interface LLMClient {
@@ -93,7 +93,7 @@ async function logUsage(feature: string, model: string, usage: LLMUsage) {
   try {
     const cost = estimateCost(model, usage.inputTokens, usage.outputTokens);
     await db.insert(llmUsageLogs).values({
-      feature: feature as "chat" | "categorize",
+      feature: feature as "chat" | "categorize" | "trips",
       model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -327,7 +327,7 @@ class AnthropicLLMClient implements LLMClient {
 
 // ── Factory ──
 
-export async function getLLMClient(feature?: "chat" | "categorize"): Promise<LLMClient> {
+export async function getLLMClient(feature?: "chat" | "categorize" | "trips"): Promise<LLMClient> {
   const config = await getConfig();
 
   if (!config) {

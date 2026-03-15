@@ -84,6 +84,7 @@ interface DashboardData {
     id: number;
     name: string;
     type: string;
+    destination: string | null;
     startDate: string;
     endDate: string | null;
     totalUsd: number;
@@ -304,6 +305,35 @@ export default function DashboardPage() {
                   {years.map((y) => {
                     const yStart = `${y}-01-01`;
                     const yEnd = y === currentYear ? lastDayPrevMonth : `${y}-12-31`;
+                    if (y === currentYear) {
+                      const oneYearAgo = new Date();
+                      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+                      const oneYStart = `${oneYearAgo.getFullYear()}-${String(oneYearAgo.getMonth() + 1).padStart(2, "0")}-01`;
+                      return (
+                        <span key={y} className="contents">
+                          <Button
+                            variant={startDate === oneYStart && endDate === lastDayPrevMonth ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => {
+                              setStartDate(oneYStart);
+                              setEndDate(lastDayPrevMonth);
+                            }}
+                          >
+                            1Y
+                          </Button>
+                          <Button
+                            variant={startDate === yStart && endDate === yEnd ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => {
+                              setStartDate(yStart);
+                              setEndDate(yEnd);
+                            }}
+                          >
+                            YTD
+                          </Button>
+                        </span>
+                      );
+                    }
                     return (
                       <Button
                         key={y}
@@ -314,7 +344,7 @@ export default function DashboardPage() {
                           setEndDate(yEnd);
                         }}
                       >
-                        {y === currentYear ? "YTD" : y}
+                        {y}
                       </Button>
                     );
                   })}
@@ -1140,7 +1170,12 @@ export default function DashboardPage() {
                           : 0;
                       return (
                         <TableRow key={evt.id}>
-                          <TableCell className="font-medium">{evt.name}</TableCell>
+                          <TableCell className="font-medium">
+                            {evt.name}
+                            {evt.destination && (
+                              <span className="ml-1 text-muted-foreground font-normal">— {evt.destination}</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-muted-foreground capitalize">{evt.type.replace("_", " ")}</TableCell>
                           <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                             {evt.startDate}{evt.endDate ? ` — ${evt.endDate}` : ""}

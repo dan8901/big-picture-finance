@@ -414,6 +414,7 @@ export async function GET(request: NextRequest) {
       id: parseInt(id),
       name: evt?.name ?? `Event #${id}`,
       type: evt?.type ?? "other",
+      destination: evt?.destination ?? null,
       startDate: evt?.startDate ?? "",
       endDate: evt?.endDate ?? null,
       totalUsd: usd,

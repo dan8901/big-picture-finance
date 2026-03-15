@@ -5,6 +5,8 @@ export interface ParsedTransaction {
   description: string;
   category?: string;
   excluded?: boolean;
+  originalCurrency?: string;
+  originalAmount?: number;
 }
 
 export interface Parser {

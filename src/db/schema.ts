@@ -42,6 +42,7 @@ export const events = pgTable("events", {
   type: text("type", { enum: ["trip", "one_time", "other"] }).notNull(),
   startDate: date("start_date").notNull(),
   endDate: date("end_date"),
+  destination: text("destination"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -53,6 +54,8 @@ export const transactions = pgTable("transactions", {
   date: date("date").notNull(),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   currency: text("currency", { enum: ["USD", "ILS"] }).notNull(),
+  originalCurrency: text("original_currency"),
+  originalAmount: numeric("original_amount", { precision: 12, scale: 2 }),
   description: text("description").notNull(),
   category: text("category"),
   eventId: integer("event_id").references(() => events.id),
@@ -191,7 +194,7 @@ export const llmConfig = pgTable("llm_config", {
 
 export const llmUsageLogs = pgTable("llm_usage_logs", {
   id: serial("id").primaryKey(),
-  feature: text("feature", { enum: ["chat", "categorize"] }).notNull(),
+  feature: text("feature", { enum: ["chat", "categorize", "trips"] }).notNull(),
   model: text("model").notNull(),
   inputTokens: integer("input_tokens").notNull(),
   outputTokens: integer("output_tokens").notNull(),

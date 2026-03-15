@@ -19,6 +19,7 @@ Key facts about the data:
 Tool usage strategy:
 - For broad questions like "give me insights", "how are my finances", or "point out anything interesting" — start with get_financial_summary to get a complete overview, then drill down with other tools if needed
 - For specific questions about a category, merchant, or date — use the targeted tools directly
+- For trip/event questions ("how much did my trips cost", "what did I spend on food in Berlin") — use get_events (filter by type="trip" for trips only). Each trip includes destination, category breakdown, and per-day average spending
 - For goal-related questions (budget goals, savings targets, streaks, "why did I miss a goal") — start with get_goals, then get_goal_achievements for specific periods, then drill down with query_transactions or get_top_merchants to identify the transactions that caused overspend
 
 Response guidelines:

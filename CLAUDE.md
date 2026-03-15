@@ -30,6 +30,7 @@ src/
 │   ├── categories/page.tsx         # Category management + migration wizard
 │   ├── merchants/page.tsx          # Merchant management — display names, merge, category editing
 │   ├── insights/page.tsx           # AI Insights — 5 pre-built insight cards generated in parallel
+│   ├── trips/page.tsx              # Trips — LLM-powered trip detection, cost breakdowns, wizard
 │   ├── settings/page.tsx           # LLM provider config + API usage/cost tracking
 │   ├── about/page.tsx              # About page — version display, update checker, update instructions
 │   └── api/
@@ -49,6 +50,8 @@ src/
 │       ├── chat/route.ts           # AI chatbot SSE endpoint (tool-calling loop)
 │       ├── chat/tools.ts           # 11 query tools for chatbot (transactions, categories, trends, etc.)
 │       ├── insights/route.ts      # AI Insights SSE endpoint — 5 curated prompts with tool-calling
+│       ├── trips/route.ts          # GET enriched trip data with spending breakdowns
+│       ├── trips/detect/route.ts   # POST LLM-powered trip transaction detection
 │       ├── goals/route.ts          # CRUD + progress computation for goals
 │       ├── goals/evaluate/route.ts # Evaluate goals for past periods, record achievements
 │       ├── goals/reorder/route.ts  # PATCH: persist drag-and-drop goal ordering
@@ -76,6 +79,7 @@ src/
         ├── types.ts                # ParsedTransaction, Parser interfaces
         ├── index.ts                # Parser registry (getParser, listParsers)
         ├── csv-utils.ts            # Shared parseCSVLine() for CSV parsers
+        ├── currency-utils.ts       # Currency symbol → ISO code mapping (shared by parsers)
         ├── cal.ts                  # ✅ Cal credit card (XLSX, Hebrew)
         ├── isracard.ts             # ✅ Isracard credit card (XLSX, Hebrew)
         ├── bank-hapoalim.ts        # ✅ Bank Hapoalim (CSV, Hebrew)
@@ -185,11 +189,11 @@ src/
 
 14 tables defined in `src/db/schema.ts`:
 - `accounts` — financial accounts with type, institution (nullable — only for transaction accounts), currency, owner
-- `transactions` — imported transactions with category, event, excluded, isRecurring flags, optional note
+- `transactions` — imported transactions with category, event, excluded, isRecurring flags, optional note, originalCurrency/originalAmount for foreign currency tracking
 - `exchange_rates` — cached daily currency rates (unique on date+pair)
 - `manual_income_entries` — recurring income with start month + monthly amount
 - `net_worth_snapshots` — point-in-time balance per account
-- `events` — trips/one-time expenses for transaction grouping
+- `events` — trips/one-time expenses for transaction grouping, with optional destination for trips
 - `exclusion_rules` — account+description pairs to auto-exclude on import
 - `merchant_categories` — merchant→category mappings (AI + user overrides) + optional displayName for consolidation
 - `import_logs` — audit log of file imports (account, filename, parser, row counts, timestamp)
@@ -228,6 +232,16 @@ npx drizzle-kit push # Push schema changes to Neon DB (also runs automatically i
 - Each card has individual regenerate button after first generation
 - `POST /api/insights` accepts `{ type }` — same SSE event format as chat (`status`, `delta`, `done`, `error`)
 - Curated prompts per insight type guide the LLM to use appropriate query tools and format responses as markdown
+
+### Trips
+- `/trips` page with LLM-powered trip detection wizard and cost breakdown cards
+- "Add Trip" wizard: user enters name + dates + optional destination → LLM analyzes transactions to identify trip-related ones
+- Pre-trip booking detection: searches 60 days before trip start for flights, hotels, insurance
+- Uses `getLLMClient("trips")` with a single LLM call (no tool-calling loop) — sends transaction lists, LLM returns JSON of trip-related IDs
+- Reuses `events` table with `type="trip"` — no new tables needed, just added `destination` column
+- Trip cards show: total cost (USD + ILS), category breakdown, per-day average, expandable transaction list
+- Edit/delete trips via events API (PUT/DELETE)
+- **Original currency capture**: Israeli card parsers (Max, Cal, Isracard) now extract original transaction currency (USD, EUR, GBP) from statements — stored in `originalCurrency`/`originalAmount` columns on transactions table — used as a strong signal for trip detection
 
 ### LLM Configuration
 - Provider config stored in `llm_config` table (single row, UI-configurable at `/settings`)

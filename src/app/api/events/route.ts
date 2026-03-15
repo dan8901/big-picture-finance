@@ -10,7 +10,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, type, startDate, endDate } = body;
+  const { name, type, startDate, endDate, destination } = body;
 
   if (!name || !type || !startDate) {
     return NextResponse.json(
@@ -21,10 +21,41 @@ export async function POST(request: NextRequest) {
 
   const [event] = await db
     .insert(events)
-    .values({ name, type, startDate, endDate: endDate || null })
+    .values({ name, type, startDate, endDate: endDate || null, destination: destination || null })
     .returning();
 
   return NextResponse.json(event, { status: 201 });
+}
+
+export async function PUT(request: NextRequest) {
+  const body = await request.json();
+  const { id, name, startDate, endDate, destination } = body;
+
+  if (!id) {
+    return NextResponse.json({ error: "id is required" }, { status: 400 });
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (name !== undefined) updates.name = name;
+  if (startDate !== undefined) updates.startDate = startDate;
+  if (endDate !== undefined) updates.endDate = endDate || null;
+  if (destination !== undefined) updates.destination = destination || null;
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  }
+
+  const [updated] = await db
+    .update(events)
+    .set(updates)
+    .where(eq(events.id, id))
+    .returning();
+
+  if (!updated) {
+    return NextResponse.json({ error: "Event not found" }, { status: 404 });
+  }
+
+  return NextResponse.json(updated);
 }
 
 export async function DELETE(request: NextRequest) {

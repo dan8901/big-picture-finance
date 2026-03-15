@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { Parser, ParsedTransaction } from "./types";
+import { mapCurrencySymbol } from "./currency-utils";
 
 export const isracardParser: Parser = {
   name: "Isracard",
@@ -33,6 +34,8 @@ export const isracardParser: Parser = {
 
       const dateStr = row[0];
       const description = row[1];
+      const origAmount = row[2]; // סכום עסקה (original amount)
+      const origCurrencyRaw = row[3]; // מטבע עסקה (original currency)
       const chargeAmount = row[4]; // סכום חיוב (in ILS)
       const chargeCurrency = row[5]; // מטבע חיוב
 
@@ -53,6 +56,10 @@ export const isracardParser: Parser = {
       const year = 2000 + parseInt(match[3]);
       const date = new Date(year, month, day);
 
+      // Detect foreign currency
+      const origCurrency = mapCurrencySymbol(typeof origCurrencyRaw === "string" ? origCurrencyRaw.trim() : "");
+      const hasForeignCurrency = origCurrency && origCurrency !== "ILS" && typeof origAmount === "number";
+
       // chargeAmount is positive for charges, negative for credits
       // Store expenses as negative
       transactions.push({
@@ -60,6 +67,7 @@ export const isracardParser: Parser = {
         amount: -chargeAmount,
         currency: "ILS",
         description: description.trim(),
+        ...(hasForeignCurrency ? { originalCurrency: origCurrency, originalAmount: -origAmount } : {}),
       });
     }
 

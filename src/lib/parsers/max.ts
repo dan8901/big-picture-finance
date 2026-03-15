@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { Parser, ParsedTransaction } from "./types";
+import { mapCurrencySymbol } from "./currency-utils";
 
 export const maxParser: Parser = {
   name: "Max",
@@ -35,6 +36,8 @@ export const maxParser: Parser = {
         const description = row[1];
         const category = row[2];
         const chargeAmount = row[5]; // סכום חיוב (in ILS)
+        const origAmount = row[7]; // סכום עסקה מקורי
+        const origCurrencyRaw = row[8]; // מטבע עסקה מקורי
 
         // Skip empty rows, summary rows
         if (typeof dateStr !== "string" || !dateStr) continue;
@@ -51,6 +54,10 @@ export const maxParser: Parser = {
         const year = parseInt(match[3]);
         const date = new Date(year, month, day);
 
+        // Detect foreign currency
+        const origCurrency = mapCurrencySymbol(typeof origCurrencyRaw === "string" ? origCurrencyRaw.trim() : "");
+        const hasForeignCurrency = origCurrency && origCurrency !== "ILS" && typeof origAmount === "number";
+
         // chargeAmount is positive for charges, negative for credits
         // Store expenses as negative
         transactions.push({
@@ -59,6 +66,7 @@ export const maxParser: Parser = {
           currency: "ILS",
           description: description.trim(),
           category: typeof category === "string" ? category : undefined,
+          ...(hasForeignCurrency ? { originalCurrency: origCurrency, originalAmount: -origAmount } : {}),
         });
       }
     }

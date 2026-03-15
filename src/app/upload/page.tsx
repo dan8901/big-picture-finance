@@ -45,6 +45,8 @@ interface PreviewTransaction {
   category?: string;
   sourceFile?: string;
   excluded?: boolean;
+  originalCurrency?: string;
+  originalAmount?: number;
 }
 
 type UploadStep = "select" | "upload" | "preview" | "done";
@@ -409,6 +411,13 @@ export default function UploadPage() {
                         {Math.abs(tx.amount).toLocaleString(undefined, {
                           minimumFractionDigits: 2,
                         })}
+                        {tx.originalCurrency && tx.originalCurrency !== tx.currency && tx.originalAmount != null && (
+                          <div className="text-xs text-muted-foreground">
+                            {tx.originalCurrency === "USD" ? "$" : tx.originalCurrency === "EUR" ? "€" : tx.originalCurrency === "GBP" ? "£" : ""}
+                            {Math.abs(tx.originalAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {" "}{tx.originalCurrency}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {tx.sourceFile}

@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { Parser, ParsedTransaction } from "./types";
+import { mapCurrencySymbol } from "./currency-utils";
 
 function excelDateToJS(serial: number): Date {
   return new Date((serial - 25569) * 86400000);
@@ -25,12 +26,27 @@ export const calParser: Parser = {
       const dateVal = row[0];
       const description = row[1];
       const amount = row[2];
+      const notes = row[8];
 
       // Skip empty rows, summary rows, and footer text
       if (typeof dateVal !== "number" || typeof amount !== "number") continue;
       if (typeof description !== "string" || !description) continue;
 
       const date = excelDateToJS(dateVal);
+
+      // Check notes for foreign currency info (e.g. "סכום העסקה הוא 61.63 $")
+      let originalCurrency: string | undefined;
+      let originalAmount: number | undefined;
+      if (typeof notes === "string") {
+        const foreignMatch = notes.match(/סכום העסקה הוא\s+([\d.]+)\s*([$€£])/);
+        if (foreignMatch) {
+          const mapped = mapCurrencySymbol(foreignMatch[2]);
+          if (mapped && mapped !== "ILS") {
+            originalCurrency = mapped;
+            originalAmount = -parseFloat(foreignMatch[1]); // negative for expenses
+          }
+        }
+      }
 
       // Amounts are positive for charges, negative for credits/refunds
       // We store expenses as negative, so flip the sign
@@ -39,6 +55,7 @@ export const calParser: Parser = {
         amount: -amount,
         currency: "ILS",
         description: description.trim(),
+        ...(originalCurrency ? { originalCurrency, originalAmount } : {}),
       });
     }
 
