@@ -178,27 +178,32 @@ export default function NetWorthPage() {
     }
   }
 
-  // Historical chart: group by snapshot date, sum all balances
-  const byDate: Record<string, number> = {};
-  const dateAccounts: Record<string, Map<number, number>> = {};
+  // Historical chart: for each snapshot date, sum the latest known balance
+  // per account (carried forward), converted to USD with the same rate the
+  // summary cards use so the last point matches the "Total Net Worth" card.
+  const toUSD = (balance: number, currency: string) =>
+    currency === "ILS" ? (ilsToUsd > 0 ? balance * ilsToUsd : 0) : balance;
 
-  for (const s of snapshots) {
-    if (!dateAccounts[s.snapshotDate]) {
-      dateAccounts[s.snapshotDate] = new Map();
+  const snapshotDates = [...new Set(snapshots.map((s) => s.snapshotDate))].sort();
+  const sortedSnapshots = [...snapshots].sort((a, b) =>
+    a.snapshotDate.localeCompare(b.snapshotDate)
+  );
+  const runningBalances = new Map<number, number>(); // accountId -> USD
+  const chartData: { date: string; total: number }[] = [];
+  let cursor = 0;
+  for (const date of snapshotDates) {
+    while (
+      cursor < sortedSnapshots.length &&
+      sortedSnapshots[cursor].snapshotDate <= date
+    ) {
+      const s = sortedSnapshots[cursor];
+      runningBalances.set(s.accountId, toUSD(parseFloat(s.balance), s.currency));
+      cursor++;
     }
-    dateAccounts[s.snapshotDate].set(s.accountId, parseFloat(s.balance));
+    let total = 0;
+    for (const b of runningBalances.values()) total += b;
+    chartData.push({ date, total: Math.round(total) });
   }
-
-  for (const [date, accountBalances] of Object.entries(dateAccounts)) {
-    byDate[date] = Array.from(accountBalances.values()).reduce(
-      (sum, b) => sum + b,
-      0
-    );
-  }
-
-  const chartData = Object.entries(byDate)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, total]) => ({ date, total }));
 
   // Filter out credit cards from balance recording
   const recordableAccounts = accounts.filter((a) => a.type !== "credit_card");
@@ -468,13 +473,19 @@ export default function NetWorthPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Net Worth Over Time</CardTitle>
+                <CardDescription>
+                  Total in USD, ILS converted at the latest rate
+                </CardDescription>
               </CardHeader>
               <CardContent className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="date" />
-                    <YAxis />
+                    <YAxis
+                      tickFormatter={(v) => `$${Math.round(Number(v) / 1000)}k`}
+                      width={70}
+                    />
                     <Tooltip
                       formatter={(value) =>
                         formatCurrency(Number(value), "USD")
