@@ -70,6 +70,7 @@ export default function NetWorthPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [snapshotDate, setSnapshotDate] = useState(
     new Date().toISOString().split("T")[0]
@@ -162,6 +163,8 @@ export default function NetWorthPage() {
   }
 
   async function saveSnapshot() {
+    if (isSaving) return; // guard against double-click / double-submit
+    setIsSaving(true);
     const entries = balances
       .filter((b) => b.balance !== "" && !isNaN(parseFloat(b.balance)))
       .map((b) => ({
@@ -176,6 +179,7 @@ export default function NetWorthPage() {
       body: JSON.stringify({ entries, snapshotDate }),
     });
 
+    setIsSaving(false);
     if (res.ok) {
       toast.success(`Saved ${entries.length} account balances`);
       setIsRecording(false);
@@ -353,8 +357,8 @@ export default function NetWorthPage() {
                       Next
                     </Button>
                   ) : (
-                    <Button size="sm" onClick={saveSnapshot}>
-                      Save All
+                    <Button size="sm" onClick={saveSnapshot} disabled={isSaving}>
+                      {isSaving ? "Saving..." : "Save All"}
                     </Button>
                   )}
                   <Button

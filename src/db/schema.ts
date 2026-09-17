@@ -101,16 +101,26 @@ export const manualIncomeEntries = pgTable("manual_income_entries", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const netWorthSnapshots = pgTable("net_worth_snapshots", {
-  id: serial("id").primaryKey(),
-  accountId: integer("account_id")
-    .references(() => accounts.id)
-    .notNull(),
-  balance: numeric("balance", { precision: 14, scale: 2 }).notNull(),
-  currency: text("currency", { enum: ["USD", "ILS"] }).notNull(),
-  snapshotDate: date("snapshot_date").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+export const netWorthSnapshots = pgTable(
+  "net_worth_snapshots",
+  {
+    id: serial("id").primaryKey(),
+    accountId: integer("account_id")
+      .references(() => accounts.id)
+      .notNull(),
+    balance: numeric("balance", { precision: 14, scale: 2 }).notNull(),
+    currency: text("currency", { enum: ["USD", "ILS"] }).notNull(),
+    snapshotDate: date("snapshot_date").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // One balance per account per day — re-recording upserts instead of duplicating
+    uniqueIndex("net_worth_snapshots_account_date_idx").on(
+      table.accountId,
+      table.snapshotDate
+    ),
+  ]
+);
 
 export const exclusionRules = pgTable(
   "exclusion_rules",

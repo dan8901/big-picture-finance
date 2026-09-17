@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { netWorthSnapshots, accounts } from "@/db/schema";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 
 export async function GET() {
   const snapshots = await db
@@ -50,20 +50,19 @@ export async function POST(request: NextRequest) {
     }));
 
   if (values.length > 0) {
-    // Re-recording an account on the same date replaces the earlier entry
-    // instead of creating a duplicate row.
+    // One row per account per day: re-recording updates the existing row
+    // (enforced by the unique index on account_id + snapshot_date).
     await db
-      .delete(netWorthSnapshots)
-      .where(
-        and(
-          eq(netWorthSnapshots.snapshotDate, snapshotDate),
-          inArray(
-            netWorthSnapshots.accountId,
-            values.map((v) => v.accountId)
-          )
-        )
-      );
-    await db.insert(netWorthSnapshots).values(values);
+      .insert(netWorthSnapshots)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [netWorthSnapshots.accountId, netWorthSnapshots.snapshotDate],
+        set: {
+          balance: sql`excluded.balance`,
+          currency: sql`excluded.currency`,
+          createdAt: sql`now()`,
+        },
+      });
   }
 
   return NextResponse.json({ created: values.length }, { status: 201 });
