@@ -308,6 +308,7 @@ AUTH_PASSWORD=...           # Single password for login
 - Recharts tooltip `formatter` must use `(value) => format(Number(value))` to avoid type errors
 - Pepper parser requires `pdftotext` system binary (poppler) — not available on Vercel serverless
 - Net worth recording skips credit card accounts (assumed paid in full monthly)
+- Net worth page: "Net Worth Over Time" chart carries forward each account's latest balance and converts ILS→USD at the latest rate (so the last point equals the Total Net Worth card); "Recording History" card lists all past snapshots grouped by date with per-row and per-date delete; re-recording an account on the same date replaces the earlier row (POST deletes account+date matches before insert)
 - Dashboard YTD default end date is last day of previous month
 - After adding/changing DB tables, always run `npx drizzle-kit push` to sync schema to Neon — never tell the user to run commands, always execute them directly
 - `AUTH_SECRET` and `CRON_SECRET` are auto-derived from `DATABASE_URL` via HMAC if env vars not set (`src/lib/auth-utils.ts`)

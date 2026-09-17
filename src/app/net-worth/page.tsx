@@ -76,6 +76,42 @@ export default function NetWorthPage() {
   );
   const [balances, setBalances] = useState<BalanceEntry[]>([]);
   const [ilsToUsd, setIlsToUsd] = useState(0);
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  async function deleteSnapshot(id: number) {
+    setDeletingId(id);
+    const res = await fetch(`/api/net-worth?id=${id}`, { method: "DELETE" });
+    setDeletingId(null);
+    if (res.ok) {
+      setSnapshots((prev) => prev.filter((s) => s.id !== id));
+    } else {
+      toast.error("Failed to delete snapshot");
+    }
+  }
+
+  async function deleteSnapshotDate(date: string, ids: number[]) {
+    const results = await Promise.all(
+      ids.map((id) => fetch(`/api/net-worth?id=${id}`, { method: "DELETE" }))
+    );
+    const failed = results.filter((r) => !r.ok).length;
+    if (failed > 0) {
+      toast.error(`Failed to delete ${failed} of ${ids.length} entries`);
+      fetchSnapshots();
+    } else {
+      toast.success(`Deleted recording from ${date}`);
+      setSnapshots((prev) => prev.filter((s) => s.snapshotDate !== date));
+    }
+  }
+
+  function toggleDate(date: string) {
+    setExpandedDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
+  }
 
   const fetchAccounts = useCallback(async () => {
     const res = await fetch("/api/accounts");
@@ -204,6 +240,15 @@ export default function NetWorthPage() {
     for (const b of runningBalances.values()) total += b;
     chartData.push({ date, total: Math.round(total) });
   }
+  const totalByDate = new Map(chartData.map((d) => [d.date, d.total]));
+
+  // Snapshot history: newest date first, entries sorted by balance
+  const historyByDate = [...snapshotDates].reverse().map((date) => ({
+    date,
+    entries: snapshots
+      .filter((s) => s.snapshotDate === date)
+      .sort((a, b) => parseFloat(b.balance) - parseFloat(a.balance)),
+  }));
 
   // Filter out credit cards from balance recording
   const recordableAccounts = accounts.filter((a) => a.type !== "credit_card");
@@ -546,6 +591,109 @@ export default function NetWorthPage() {
                 </TableBody>
               </Table>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Snapshot History */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Recording History</CardTitle>
+              <CardDescription>
+                All past balance recordings. Click a date to expand or delete
+                entries.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {historyByDate.map(({ date, entries }) => {
+                const expanded = expandedDates.has(date);
+                const total = totalByDate.get(date) ?? 0;
+                return (
+                  <div key={date} className="rounded-lg border">
+                    <div className="flex flex-wrap items-center justify-between gap-2 p-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleDate(date)}
+                        className="flex flex-1 items-center gap-3 text-left"
+                        aria-expanded={expanded}
+                      >
+                        <span className="text-muted-foreground text-xs w-4">
+                          {expanded ? "▼" : "▶"}
+                        </span>
+                        <span className="font-medium">{date}</span>
+                        <Badge variant="secondary">
+                          {entries.length}{" "}
+                          {entries.length === 1 ? "account" : "accounts"}
+                        </Badge>
+                        <span className="ml-auto text-sm text-muted-foreground">
+                          Net worth {formatCurrency(total, "USD")}
+                        </span>
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() =>
+                          deleteSnapshotDate(
+                            date,
+                            entries.map((e) => e.id)
+                          )
+                        }
+                      >
+                        Delete all
+                      </Button>
+                    </div>
+                    {expanded && (
+                      <div className="overflow-x-auto border-t">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Account</TableHead>
+                              <TableHead>Owner</TableHead>
+                              <TableHead>Type</TableHead>
+                              <TableHead className="text-right">
+                                Balance
+                              </TableHead>
+                              <TableHead className="w-[80px]" />
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {entries.map((s) => (
+                              <TableRow key={s.id}>
+                                <TableCell className="font-medium">
+                                  {s.accountName}
+                                </TableCell>
+                                <TableCell>{s.accountOwner}</TableCell>
+                                <TableCell>
+                                  <Badge variant="secondary">
+                                    {typeLabels[s.accountType] ?? s.accountType}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right font-medium">
+                                  {formatCurrency(
+                                    parseFloat(s.balance),
+                                    s.currency
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive hover:text-destructive"
+                                    disabled={deletingId === s.id}
+                                    onClick={() => deleteSnapshot(s.id)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
         </>
